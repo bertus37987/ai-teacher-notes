@@ -1,0 +1,11 @@
+node_modules/
+main.js
+web-dist/
+.vercel/
+*.zip
+*.log
+plugin-dist/
+lab-dist/
+.env
+.env.*
+!.env.example

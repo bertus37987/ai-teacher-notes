@@ -1,0 +1,43 @@
+{
+  "name": "ai-teacher-notes",
+  "version": "0.1.0",
+  "description": "A multi-page visual learning notebook where people and AI teach on the same editable canvas.",
+  "main": "main.js",
+  "scripts": {
+    "build": "node esbuild.mjs production",
+    "plugin:package": "npm run build && node scripts/build-plugin.mjs",
+    "dev": "node esbuild.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/test.mjs",
+    "web:build": "node web-esbuild.mjs --production",
+    "web:dev": "node web-esbuild.mjs",
+    "lab:build": "node scripts/build-lab.mjs",
+    "verify": "npm run typecheck && npm test && npm run web:build"
+  },
+  "keywords": [
+    "obsidian",
+    "handwriting",
+    "stylus",
+    "apple-pencil",
+    "math",
+    "education",
+    "tutoring",
+    "mcp",
+    "whiteboard",
+    "collaboration"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": "24.x"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "esbuild": "^0.28.2",
+    "obsidian": "^1.13.1",
+    "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "ink-stroke-modeler-ts": "https://github.com/WhiteboardCX/ink-stroke-modeler-ts/archive/240d80f2c78c2f70317b498d37564f90fcddfe0c.tar.gz",
+    "onnxruntime-web": "1.27.0"
+  }
+}

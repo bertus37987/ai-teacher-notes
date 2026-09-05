@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["@playwright/mcp@latest"]
+    },
+    "video": {
+      "command": "npx",
+      "args": ["-y", "@studiomeyer-io/mcp-video"]
+    }
+  }
+}

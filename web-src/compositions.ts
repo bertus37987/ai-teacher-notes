@@ -1,0 +1,673 @@
+import { CanvasOperation } from "./model";
+import { TextBlock, measureTextBlock } from "./measure";
+import { accentTints, accents, palette, radius, spacing, typeScale } from "./theme";
+import { Repair, repairComposition } from "./repair";
+import { headerWidth, laneLayout } from "./layout";
+
+export type VisualKind = "flowchart" | "mindmap" | "ui_wireframe" | "ui_mockup" | "research_report" | "math_steps" | "plot" | "study_note" | "timeline" | "comparison" | "hierarchy" | "visual_explainer" | "guided_explainer" | "sequence" | "board" | "roadmap";
+export const visualKinds: VisualKind[] = ["flowchart", "mindmap", "ui_wireframe", "ui_mockup", "research_report", "math_steps", "plot", "study_note", "timeline", "comparison", "hierarchy", "visual_explainer", "guided_explainer", "sequence", "board", "roadmap"];
+
+export interface VisualNodeInput {
+  id: string;
+  label: string;
+  detail?: string;
+  parentId?: string;
+  role?: "primary" | "secondary" | "decision" | "frame" | "screen" | "header" | "navbar" | "sidebar" | "section" | "card" | "button" | "input" | "checkbox" | "radio" | "switch" | "select" | "tabs" | "list" | "modal" | "badge" | "avatar" | "divider" | "icon" | "image" | "price" | "chip" | "callout" | "legend" | "example" | "warning" | "source" | "text";
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  /* Per-element design. The theme sets the screen; these say how one element differs from it. */
+  /** Background of this one element — a green price, a red warning. */
+  fill?: string;
+  /** Overrides the colour the text would take from the theme or from the fill's contrast. */
+  textColor?: string;
+  /** Corner rounding: 0 is a sharp edge, a large number is a pill. */
+  radius?: number;
+  fontSize?: number;
+  fontWeight?: 400 | 500 | 600 | 700;
+}
+
+export interface VisualEdgeInput { fromId: string; toId: string; label?: string; detail?: string }
+/** A kanban column and its cards. */
+export interface VisualColumnInput { name: string; cards: Array<{ label: string; detail?: string; accent?: string }> }
+/** One bar or milestone on a roadmap, positioned by period index. */
+export interface VisualItemInput { lane: string; label: string; start: number; span?: number; milestone?: boolean }
+export interface VisualSectionInput { heading: string; body: string }
+export interface VisualStepInput { expression: string; explanation?: string }
+export interface VisualSeriesInput { label?: string; color?: string; points: Array<{ x: number; y: number }> }
+
+export interface VisualCompositionInput {
+  kind: VisualKind;
+  id?: string;
+  title?: string;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  nodes?: VisualNodeInput[];
+  edges?: VisualEdgeInput[];
+  sections?: VisualSectionInput[];
+  steps?: VisualStepInput[];
+  axes?: { xMin: number; xMax: number; yMin: number; yMax: number; xLabel?: string; yLabel?: string };
+  series?: VisualSeriesInput[];
+  columns?: VisualColumnInput[];
+  lanes?: string[];
+  periods?: string[];
+  items?: VisualItemInput[];
+  presentationSteps?: Array<{ title: string; body?: string; focusIds: string[]; revealIds?: string[] }>;
+  theme?: { background?: string; surface?: string; text?: string; accent?: string };
+}
+
+const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
+const optionalFinite = (value: unknown): boolean => value === undefined || finite(value);
+const cleanId = (value: string): string => value.trim().replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64) || "item";
+
+export function isVisualComposition(value: unknown): value is VisualCompositionInput {
+  if (!value || typeof value !== "object") return false; const input = value as Record<string, unknown>;
+  if (!(visualKinds as string[]).includes(String(input.kind))) return false;
+  if (![input.x, input.y, input.width, input.height].every(optionalFinite)) return false;
+  if (input.nodes !== undefined && (!Array.isArray(input.nodes) || input.nodes.length > 40 || input.nodes.some((node) => !node || typeof node !== "object" || typeof node.id !== "string" || typeof node.label !== "string" || !optionalFinite(node.x) || !optionalFinite(node.y) || !optionalFinite(node.width) || !optionalFinite(node.height) || !optionalFinite(node.radius) || !optionalFinite(node.fontSize) || (node.fill !== undefined && typeof node.fill !== "string") || (node.textColor !== undefined && typeof node.textColor !== "string") || (node.fontWeight !== undefined && ![400, 500, 600, 700].includes(node.fontWeight))))) return false;
+  if (input.edges !== undefined && (!Array.isArray(input.edges) || input.edges.length > 80 || input.edges.some((edge) => !edge || typeof edge !== "object" || typeof edge.fromId !== "string" || typeof edge.toId !== "string"))) return false;
+  if (input.sections !== undefined && (!Array.isArray(input.sections) || input.sections.length > 20 || input.sections.some((section) => !section || typeof section !== "object" || typeof section.heading !== "string" || typeof section.body !== "string"))) return false;
+  if (input.steps !== undefined && (!Array.isArray(input.steps) || input.steps.length > 30 || input.steps.some((step) => !step || typeof step !== "object" || typeof step.expression !== "string"))) return false;
+  if (input.series !== undefined && (!Array.isArray(input.series) || input.series.length > 8 || input.series.some((series) => !series || typeof series !== "object" || !Array.isArray(series.points) || series.points.length > 400 || series.points.some((point: Record<string, unknown>) => !point || !finite(point.x) || !finite(point.y))))) return false;
+  if (input.columns !== undefined && (!Array.isArray(input.columns) || input.columns.length > 8 || input.columns.some((column) => !column || typeof column !== "object" || typeof column.name !== "string" || !Array.isArray(column.cards) || column.cards.length > 30 || column.cards.some((card: Record<string, unknown>) => !card || typeof card.label !== "string")))) return false;
+  if (input.lanes !== undefined && (!Array.isArray(input.lanes) || input.lanes.length > 12 || input.lanes.some((lane) => typeof lane !== "string"))) return false;
+  if (input.periods !== undefined && (!Array.isArray(input.periods) || input.periods.length > 16 || input.periods.some((period) => typeof period !== "string"))) return false;
+  if (input.items !== undefined && (!Array.isArray(input.items) || input.items.length > 60 || input.items.some((item) => !item || typeof item !== "object" || typeof item.lane !== "string" || typeof item.label !== "string" || !finite(item.start) || (item.span !== undefined && !finite(item.span))))) return false;
+  if (input.presentationSteps !== undefined && (!Array.isArray(input.presentationSteps) || input.presentationSteps.length > 40 || input.presentationSteps.some((step) => !step || typeof step !== "object" || typeof step.title !== "string" || !Array.isArray(step.focusIds) || step.focusIds.some((id: unknown) => typeof id !== "string")))) return false;
+  return true;
+}
+
+function idsFor(prefix: string, node: VisualNodeInput): { shape: string; text: string; group: string } {
+  const id = cleanId(node.id); return { shape: `${prefix}-${id}`, text: `${prefix}-${id}-label`, group: `${prefix}-${id}-group` };
+}
+
+const CARD_PADDING = spacing.md;
+/** How the agent's work is drawn: plain type and straight lines, or the hand-drawn look. */
+export interface AgentStyle { fontFamily: "sans" | "handwriting"; renderStyle: "clean" | "sketch" }
+const HAND_DRAWN: AgentStyle = { fontFamily: "handwriting", renderStyle: "sketch" };
+
+/**
+ * Module state, on purpose: every measurement helper below needs the face that will actually render,
+ * and threading it through a dozen signatures would say nothing the name does not already say.
+ * Only withAgentStyle sets it, and it always puts the previous value back.
+ */
+let active: AgentStyle = HAND_DRAWN;
+const agentFont = (): AgentStyle["fontFamily"] => active.fontFamily;
+const agentRender = (): AgentStyle["renderStyle"] => active.renderStyle;
+function withAgentStyle<T>(style: AgentStyle | undefined, run: () => T): T {
+  const previous = active; active = style ?? HAND_DRAWN;
+  try { return run(); } finally { active = previous; }
+}
+
+const cardText = (node: VisualNodeInput): string => node.detail ? `${node.label}\n${node.detail}` : node.label;
+const cardFontSize = (node: VisualNodeInput): number => node.fontSize ?? (node.detail ? typeScale.detail.fontSize : typeScale.body.fontSize);
+/** A restaurant name may be heavier than its rating; measuring has to know that too. */
+const cardFontWeight = (node: VisualNodeInput): 400 | 500 | 600 | 700 | undefined => node.fontWeight;
+const cardTextWidth = (width: number): number => Math.max(60, width - CARD_PADDING * 2);
+/** How tall a bare text row really is at the size it was asked for. */
+function textRowHeight(node: VisualNodeInput, width: number): number {
+  const text = node.detail ? `${node.label}
+${node.detail}` : node.label;
+  return Math.ceil(measureTextBlock({ text, width, fontSize: node.fontSize ?? typeScale.detail.fontSize, fontWeight: node.fontWeight, fontFamily: "sans" }).height) + 6;
+}
+
+/** Roles that read as a pill: their corners follow their own height. */
+const PILL_ROLES = ["chip", "badge", "input", "switch"];
+/** Whether a background is dark enough that black type on it would not be readable. */
+const onDarkGround = (colour: string): boolean => relativeContrast(colour);
+
+/** How tall a card has to be for its own text — measured with the renderer's font, not guessed. */
+export function cardHeight(node: VisualNodeInput, width: number, minimum = 96): number {
+  const measured = measureTextBlock({ text: cardText(node), width: cardTextWidth(width), fontSize: cardFontSize(node), fontWeight: cardFontWeight(node), fontFamily: agentFont() });
+  return Math.max(minimum, Math.round(measured.height + CARD_PADDING * 2));
+}
+
+/** Narrowest a card may be before an unbreakable word spills out of it. */
+export function cardMinimumWidth(node: VisualNodeInput): number {
+  const measured = measureTextBlock({ text: cardText(node), width: 10000, fontSize: cardFontSize(node), fontWeight: cardFontWeight(node), fontFamily: agentFont() });
+  return Math.ceil(measured.longestWord + CARD_PADDING * 2);
+}
+
+/** Row heights for a grid of cards: every row is as tall as its tallest card, never a fixed stride. */
+function gridRowHeights(nodes: VisualNodeInput[], columns: number, cardWidth: (node: VisualNodeInput) => number, minimum: number): number[] {
+  const heights: number[] = [];
+  nodes.forEach((node, index) => {
+    const row = Math.floor(index / columns); const height = node.height ?? cardHeight(node, cardWidth(node), minimum);
+    heights[row] = Math.max(heights[row] ?? 0, height);
+  });
+  return heights;
+}
+
+/** Axis and legend labels are captions: one line, truncated rather than allowed to cover the plot. */
+/**
+ * A card carries the headline; anything longer belongs in the narration, which the explanation bar
+ * already shows. Nothing is lost, the board just stops being a wall of prose.
+ */
+export function splitDetail(detail: string | undefined, limit = 90): { summary?: string; body?: string } {
+  if (!detail) return {};
+  const trimmed = detail.trim(); if (!trimmed) return {};
+  if (trimmed.length <= limit) return { summary: trimmed, body: trimmed };
+  const sentence = /^(.{20,120}?[.!?])(\s|$)/.exec(trimmed);
+  return { summary: sentence ? sentence[1] : `${trimmed.slice(0, limit - 1).trimEnd()}…`, body: trimmed };
+}
+
+const caption = (text: string, limit = 34): string => text.length > limit ? `${text.slice(0, limit - 1).trimEnd()}…` : text;
+
+const rowOffset = (heights: number[], row: number, gap: number): number => heights.slice(0, row).reduce((total, height) => total + height + gap, 0);
+
+/** Height a sticky note needs for its text, matching the padding the store gives note bodies. */
+function noteHeight(text: string, width: number, blockStyle?: TextBlock["blockStyle"], minimum = 90): number {
+  return Math.max(minimum, Math.round(measureTextBlock({ text, width: Math.max(84, width - 36), fontSize: 24, blockStyle, fontFamily: agentFont() }).height + 36));
+}
+
+function cardOperations(prefix: string, node: VisualNodeInput, x: number, y: number, width: number, height: number, ellipse = false, accent?: string): CanvasOperation[] {
+  const ids = idsFor(prefix, node); const text = cardText(node); const fontSize = cardFontSize(node);
+  const emphasized = node.role === "primary" || node.role === "button";
+  const textWidth = cardTextWidth(width);
+  const measured = measureTextBlock({ text, width: textWidth, fontSize, fontWeight: cardFontWeight(node), fontFamily: agentFont() });
+  const boxHeight = Math.max(height, Math.round(measured.height + CARD_PADDING * 2));
+  // What the element itself asks for wins over what the role would have given it.
+  const fill = node.fill ?? (accent ? accentTints[accents.indexOf(accent as typeof accents[number])] ?? palette.surface : emphasized ? palette.hairline : palette.surface);
+  const rounding = node.radius ?? (PILL_ROLES.includes(node.role ?? "") ? boxHeight / 2 : node.role === "button" || node.role === "input" ? radius.control : radius.card);
+  const ink = node.textColor ?? (node.fill && onDarkGround(node.fill) ? palette.surface : palette.ink);
+  return [
+    { type: "create_shape", id: ids.shape, kind: ellipse ? "ellipse" : "rectangle", x, y, width, height: boxHeight, color: node.fill ? node.fill : accent ?? palette.ink, strokeWidth: emphasized ? 4 : 2.5, fillColor: fill, fillOpacity: node.fill ? 1 : accent ? 1 : emphasized ? 0.32 : 1, radius: ellipse ? undefined : Math.min(rounding, boxHeight / 2, width / 2) },
+    { type: "create_text", id: ids.text, x: x + CARD_PADDING, y: y + Math.max(CARD_PADDING * .6, (boxHeight - measured.height) / 2), width: textWidth, fontSize, fontWeight: node.fontWeight, color: ink, text, onFilledSurface: true },
+    { type: "group", groupId: ids.group, ids: [ids.shape, ids.text] }
+  ];
+}
+
+/** How much room the composed title actually takes, so content can start below it. */
+function titleBlockHeight(title: string | undefined, width: number): number {
+  return title ? measureTextBlock({ text: title, width, fontSize: typeScale.title.fontSize, fontWeight: typeScale.title.fontWeight, blockStyle: "heading-1", fontFamily: agentFont() }).height : 0;
+}
+
+function titleOperations(prefix: string, title: string | undefined, x: number, y: number, width: number): CanvasOperation[] {
+  return title ? [{ type: "create_text", id: `${prefix}-title`, x, y, width, fontSize: typeScale.title.fontSize, color: palette.ink, text: title, fontWeight: typeScale.title.fontWeight, blockStyle: "heading-1", renderStyle: agentRender() }] : [];
+}
+
+/**
+ * Depth of every node along the edges, so a flow can be laid out in the order it actually runs
+ * instead of a square grid. Cycles are bounded by visiting each node once.
+ */
+function layerNodes(nodes: VisualNodeInput[], edges: VisualEdgeInput[]): Map<string, number> {
+  const depth = new Map(nodes.map((node) => [node.id, 0]));
+  const incoming = new Map(nodes.map((node) => [node.id, 0]));
+  for (const edge of edges) if (incoming.has(edge.toId)) incoming.set(edge.toId, (incoming.get(edge.toId) ?? 0) + 1);
+  const roots = nodes.filter((node) => (incoming.get(node.id) ?? 0) === 0).map((node) => node.id);
+  const queue = roots.length ? [...roots] : [nodes[0].id];
+  const seen = new Set(queue);
+  while (queue.length) {
+    const id = queue.shift()!;
+    for (const edge of edges.filter((candidate) => candidate.fromId === id && depth.has(candidate.toId))) {
+      // First visit wins: a back edge must not drag its target to the end of the flow.
+      if (seen.has(edge.toId)) continue;
+      depth.set(edge.toId, (depth.get(id) ?? 0) + 1); seen.add(edge.toId); queue.push(edge.toId);
+    }
+  }
+  return depth;
+}
+
+function flowchart(input: VisualCompositionInput, prefix: string): CanvasOperation[] {
+  const nodes = input.nodes ?? [];
+  const x = input.x ?? -420; const y = input.y ?? -260;
+  if (!nodes.length) return titleOperations(prefix, input.title, x, y - 70, input.width ?? 900);
+  const edges: VisualEdgeInput[] = input.edges ?? nodes.filter((node) => node.parentId).map((node) => ({ fromId: node.parentId!, toId: node.id }));
+  const depth = layerNodes(nodes, edges);
+  const columns: VisualNodeInput[][] = [];
+  for (const node of nodes) { const column = depth.get(node.id) ?? 0; (columns[column] ??= []).push(node); }
+  const filled = columns.filter(Boolean);
+
+  const columnGap = 120; const rowGap = spacing.xl;
+  const sizes = filled.map((column) => column.map((node) => ({
+    node,
+    width: node.width ?? Math.max(200, cardMinimumWidth(node)),
+    height: node.height ?? cardHeight(node, node.width ?? Math.max(200, cardMinimumWidth(node)), 96)
+  })));
+  const columnWidths = sizes.map((column) => Math.max(...column.map((entry) => entry.width)));
+  const columnHeights = sizes.map((column) => column.reduce((total, entry) => total + entry.height + rowGap, -rowGap));
+  const tallest = Math.max(...columnHeights);
+
+  const operations = titleOperations(prefix, input.title, x, y - Math.max(70, titleBlockHeight(input.title, input.width ?? 900) + spacing.lg), input.width ?? 900);
+  const nodeIds = new Map<string, string>();
+  let cursorX = x;
+  sizes.forEach((column, columnIndex) => {
+    // Each column is centred against the tallest one, so a flow reads along a spine.
+    let cursorY = y + (tallest - columnHeights[columnIndex]) / 2;
+    for (const entry of column) {
+      const px = entry.node.x ?? cursorX + (columnWidths[columnIndex] - entry.width) / 2;
+      const py = entry.node.y ?? cursorY;
+      operations.push(...cardOperations(prefix, entry.node, px, py, entry.width, entry.height, entry.node.role === "decision", entry.node.role === "decision" ? palette.info : undefined));
+      nodeIds.set(entry.node.id, idsFor(prefix, entry.node).shape);
+      cursorY += entry.height + rowGap;
+    }
+    cursorX += columnWidths[columnIndex] + columnGap;
+  });
+  for (const [index, edge] of edges.entries()) {
+    const fromId = nodeIds.get(edge.fromId); const toId = nodeIds.get(edge.toId);
+    if (fromId && toId) operations.push({ type: "connect", id: `${prefix}-edge-${index}`, fromId, toId, label: edge.label, color: palette.ink, strokeWidth: 2.5, route: "orthogonal" });
+  }
+  return operations;
+}
+
+function mindmap(input: VisualCompositionInput, prefix: string): CanvasOperation[] {
+  const nodes = input.nodes ?? []; if (!nodes.length) return titleOperations(prefix, input.title, input.x ?? -180, (input.y ?? 0) - 100, 360);
+  const centerX = input.x ?? 0; const centerY = input.y ?? 0;
+  // The ring has to be big enough for the bubbles it carries, otherwise every branch collides.
+  const ring = nodes.slice(1);
+  const ringWidth = ring.reduce((widest, node) => Math.max(widest, node.width ?? Math.max(180, cardMinimumWidth(node))), 180);
+  const ringHeight = ring.reduce((tallest, node) => Math.max(tallest, node.height ?? cardHeight(node, node.width ?? 180, 86)), 86);
+  const spread = Math.max(1, ring.length) * (ringWidth + spacing.lg) / (2 * Math.PI);
+  const radiusX = Math.max(320, (input.width ?? 900) / 2, spread + ringWidth / 2); const radiusY = Math.max(220, (input.height ?? 620) / 2, spread * .8 + ringHeight / 2); const operations = titleOperations(prefix, input.title, centerX - 220, centerY - radiusY - Math.max(100, titleBlockHeight(input.title, 440) + spacing.lg), 440); const nodeIds = new Map<string, string>(); const root = nodes[0];
+  nodes.forEach((node, index) => { const angle = index === 0 ? 0 : (index - 1) / Math.max(1, nodes.length - 1) * Math.PI * 2 - Math.PI / 2; const w = node.width ?? Math.max(index === 0 ? 220 : 180, cardMinimumWidth(node)); const h = node.height ?? cardHeight(node, w, index === 0 ? 110 : 86); const px = node.x ?? (index === 0 ? centerX - w / 2 : centerX + Math.cos(angle) * radiusX - w / 2); const py = node.y ?? (index === 0 ? centerY - h / 2 : centerY + Math.sin(angle) * radiusY - h / 2); operations.push(...cardOperations(prefix, { ...node, role: index === 0 ? "primary" : node.role }, px, py, w, h, true, index === 0 ? undefined : accents[(index - 1) % accents.length])); nodeIds.set(node.id, idsFor(prefix, node).shape); });
+  nodes.slice(1).forEach((node, index) => { const fromId = nodeIds.get(node.parentId ?? root.id); const toId = nodeIds.get(node.id); if (fromId && toId) operations.push({ type: "connect", id: `${prefix}-branch-${index}`, fromId, toId, color: accents[index % accents.length], strokeWidth: 2, route: "curved" }); });
+  for (const [index, edge] of (input.edges ?? []).entries()) { const fromId = nodeIds.get(edge.fromId); const toId = nodeIds.get(edge.toId); if (fromId && toId) operations.push({ type: "connect", id: `${prefix}-edge-${index}`, fromId, toId, label: edge.label, color: palette.muted, strokeWidth: 2, route: "curved" }); }
+  return operations;
+}
+
+const FULL_WIDTH_ROLES = ["header", "navbar", "divider", "tabs"];
+
+function uiWireframe(input: VisualCompositionInput, prefix: string): CanvasOperation[] {
+  const x = input.x ?? -520; const y = input.y ?? -330; const width = input.width ?? 1040;
+  const theme = { background: input.theme?.background ?? palette.surface, surface: input.theme?.surface ?? palette.surface, text: input.theme?.text ?? palette.ink, accent: input.theme?.accent ?? palette.ink };
+  const artboardId = `${prefix}-screen-border`;
+  const defaults: Record<string, { w: number; h: number }> = { header: { w: width - 60, h: 76 }, navbar: { w: width - 60, h: 68 }, sidebar: { w: 220, h: 320 }, section: { w: 520, h: 260 }, card: { w: 250, h: 150 }, button: { w: 180, h: 56 }, input: { w: 260, h: 56 }, checkbox: { w: 180, h: 48 }, radio: { w: 180, h: 48 }, switch: { w: 120, h: 48 }, select: { w: 240, h: 56 }, tabs: { w: width - 60, h: 52 }, list: { w: 320, h: 220 }, modal: { w: 440, h: 300 }, badge: { w: 110, h: 42 }, avatar: { w: 72, h: 72 }, divider: { w: width - 60, h: 12 }, icon: { w: 48, h: 48 }, text: { w: 300, h: 70 }, frame: { w: 420, h: 280 }, image: { w: 260, h: 160 }, price: { w: 96, h: 44 }, chip: { w: 120, h: 40 } };
+  const nodes = input.nodes ?? []; const margin = 30; const gap = spacing.md;
+  const left = x + margin; const right = x + width - margin;
+  // Flow the components instead of forcing them into three fixed columns.
+  // The flow starts below the artboard title, however many lines that title needs.
+  const titleHeight = input.title ? measureTextBlock({ text: input.title, width: width - 36, fontSize: 28, fontWeight: 700, blockStyle: "heading-2", fontFamily: "sans" }).height : 0;
+  let flowLeft = left; let cursorX = left; let cursorY = y + Math.max(110, 12 + titleHeight + spacing.lg); let rowHeight = 0; let lowest = cursorY;
+  const placed = nodes.map((node) => {
+    const role = node.role ?? "card"; const size = defaults[role] ?? defaults.card;
+    const w = node.width ?? Math.min(Math.max(size.w, role === "text" ? 0 : cardMinimumWidth(node)), right - flowLeft);
+    const h = node.height ?? (role === "text" ? Math.max(size.h, textRowHeight(node, w)) : Math.max(size.h, cardHeight(node, w, 0)));
+    if (node.x !== undefined && node.y !== undefined) { lowest = Math.max(lowest, node.y + h); return { node, role, x: node.x, y: node.y, w, h }; }
+    if (role === "sidebar") {
+      const placement = { node, role, x: left, y: cursorY, w, h: node.height ?? Math.max(size.h, cardHeight(node, w, 0)) };
+      flowLeft = left + w + gap; cursorX = flowLeft; lowest = Math.max(lowest, placement.y + placement.h); return placement;
+    }
+    if (FULL_WIDTH_ROLES.includes(role)) {
+      if (rowHeight) { cursorY += rowHeight + gap; rowHeight = 0; }
+      const placement = { node, role, x: flowLeft, y: cursorY, w: node.width ?? right - flowLeft, h };
+      cursorY += h + gap; cursorX = flowLeft; lowest = Math.max(lowest, placement.y + h); return placement;
+    }
+    if (cursorX > flowLeft && cursorX + w > right) { cursorY += rowHeight + gap; cursorX = flowLeft; rowHeight = 0; }
+    const placement = { node, role, x: cursorX, y: cursorY, w, h };
+    cursorX += w + gap; rowHeight = Math.max(rowHeight, h); lowest = Math.max(lowest, cursorY + h);
+    return placement;
+  });
+  const height = input.height ?? Math.max(360, lowest - y + margin);
+  const operations: CanvasOperation[] = [
+    { type: "create_frame", id: `${prefix}-screen`, x, y, width, height, title: input.title, color: theme.text, backgroundColor: theme.background, artboardPreset: width < 600 ? "mobile" : "desktop", semanticRole: "artboard", name: input.title ?? "UI mockup" }
+  ];
+  for (const placement of placed) {
+    const { node, role, w, h } = placement;
+    if (role === "text") {
+      operations.push({ type: "create_text", id: idsFor(prefix, node).text, x: placement.x, y: placement.y, width: w, fontSize: node.fontSize ?? typeScale.detail.fontSize, fontWeight: node.fontWeight, color: node.textColor ?? theme.text, text: node.detail ? `${node.label}\n${node.detail}` : node.label, semanticRole: role, parentId: artboardId, fontFamily: "sans" });
+      continue;
+    }
+    if (role === "image") {
+      // A photo that is not there yet: the crossed box every mockup uses, so nobody mistakes it
+      // for a real picture and the caption still says what belongs there.
+      const ids = idsFor(prefix, node);
+      operations.push(
+        { type: "create_shape", id: ids.shape, kind: "rectangle", x: placement.x, y: placement.y, width: w, height: h, color: node.fill ?? palette.hairline, strokeWidth: 2, fillColor: node.fill ?? theme.surface, fillOpacity: 1, radius: node.radius ?? radius.card, semanticRole: "image", parentId: artboardId, name: node.label },
+        { type: "create_path", id: `${ids.shape}-cross`, d: "M 0 0 L 100 100 M 100 0 L 0 100", x: placement.x + 12, y: placement.y + 12, width: w - 24, height: h - 24, color: palette.hairline, strokeWidth: 1.5, renderStyle: "clean" },
+        { type: "create_text", id: ids.text, x: placement.x + CARD_PADDING, y: placement.y + h - 34, width: w - CARD_PADDING * 2, fontSize: typeScale.caption.fontSize, fontWeight: node.fontWeight, color: node.textColor ?? theme.text, text: node.label, fontFamily: "sans", parentId: artboardId },
+        { type: "group", groupId: ids.group, ids: [ids.shape, `${ids.shape}-cross-0`, `${ids.shape}-cross-1`, ids.text] }
+      );
+      continue;
+    }
+    const card = cardOperations(prefix, node, placement.x, placement.y, w, h, role === "avatar");
+    for (const operation of card) {
+      if (operation.type === "create_shape" || operation.type === "create_text") operation.parentId = artboardId;
+      // The theme paints the screen; anything the element asked for itself stays untouched.
+      if (operation.type === "create_shape" && !node.fill) { operation.semanticRole = role; operation.fillColor = role === "button" ? theme.accent : theme.surface; operation.fillOpacity = 1; }
+      else if (operation.type === "create_shape") operation.semanticRole = role;
+      // A screen mockup is printed interface, not a sketch: its type stays plain whatever the board
+      // style is, and saying so here keeps measurement and rendering in step.
+      if (operation.type === "create_text") {
+        if (!node.textColor) operation.color = node.fill ? (onDarkGround(node.fill) ? palette.surface : theme.text) : role === "button" && relativeContrast(theme.accent) ? palette.surface : theme.text;
+        operation.fontFamily = "sans";
+      }
+    }
+    operations.push(...card);
+  }
+  operations.push({ type: "reorder", ids: [artboardId], direction: "back" });
+  return operations;
+}
+
+/** True when a fill is dark enough that its label has to be light. */
+function relativeContrast(colour: string): boolean {
+  const match = /^#([0-9a-f]{6})$/i.exec(colour); if (!match) return false;
+  const value = Number.parseInt(match[1], 16);
+  const luminance = ((value >> 16 & 255) * .2126 + (value >> 8 & 255) * .7152 + (value & 255) * .0722) / 255;
+  return luminance < .5;
+}
+
+function researchReport(input: VisualCompositionInput, prefix: string): CanvasOperation[] {
+  const x = input.x ?? -500; const y = input.y ?? -340; const width = input.width ?? 1000; const sections = input.sections ?? []; const columns = sections.length > 3 ? 2 : 1; const cardWidth = (width - (columns - 1) * 34) / columns; const operations = titleOperations(prefix, input.title ?? "Research brief", x, y, width);
+  const nodes: VisualNodeInput[] = sections.map((section, index) => ({ id: `section-${index}`, label: section.heading, detail: section.body, role: index === 0 ? "primary" : "card" }));
+  const heights = gridRowHeights(nodes, columns, () => cardWidth, 140);
+  const briefTop = Math.max(90, titleBlockHeight(input.title ?? "Research brief", width) + spacing.lg);
+  nodes.forEach((node, index) => { const column = index % columns; const row = Math.floor(index / columns); operations.push(...cardOperations(prefix, node, x + column * (cardWidth + 34), y + briefTop + rowOffset(heights, row, 36), cardWidth, heights[row])); });
+  return operations;
+}
+
+function mathSteps(input: VisualCompositionInput, prefix: string): CanvasOperation[] {
+  const x = input.x ?? -380; const y = input.y ?? -300; const width = input.width ?? 760; const operations = titleOperations(prefix, input.title ?? "Calculation steps", x, y, width); const steps = input.steps ?? [];
+  const stepNodes: VisualNodeInput[] = steps.map((step, index) => ({ id: `step-${index}`, label: `${index + 1}. ${step.expression}`, detail: step.explanation, role: index === steps.length - 1 ? "primary" : "card" }));
+  let cursor = y + Math.max(82, titleBlockHeight(input.title ?? "Calculation steps", width) + spacing.lg);
+  stepNodes.forEach((node, index) => { const height = cardHeight(node, width, 96); operations.push(...cardOperations(prefix, node, x, cursor, width, height)); cursor += height + spacing.lg; if (index > 0) operations.push({ type: "connect", id: `${prefix}-step-edge-${index}`, fromId: `${prefix}-step-${index - 1}`, toId: `${prefix}-step-${index}`, color: palette.muted, strokeWidth: 2 }); });
+  return operations;
+}
+
+function plot(input: VisualCompositionInput, prefix: string): CanvasOperation[] {
+  const x = input.x ?? -460; const y = input.y ?? -300; const width = input.width ?? 920; const axes = input.axes ?? { xMin: -10, xMax: 10, yMin: -10, yMax: 10 }; const padding = 74;
+  // The plot area starts under the title, however many lines it takes, and the frame grows with it.
+  const titleHeight = measureTextBlock({ text: input.title ?? "Graph", width: width - 48, fontSize: typeScale.title.fontSize, fontWeight: typeScale.title.fontWeight, blockStyle: "heading-1", fontFamily: agentFont() }).height;
+  const series = (input.series ?? []).filter((entry) => entry.points.length >= 2);
+  const legendRows = Math.ceil(series.filter((entry) => entry.label).length / 2);
+  const legendHeight = legendRows * 28 + (legendRows ? spacing.sm : 0);
+  const height = Math.max(input.height ?? 600, Math.round(titleHeight + 420 + legendHeight));
+  const left = x + padding; const right = x + width - 28; const top = y + 18 + titleHeight + spacing.md; const bottom = y + height - padding - legendHeight; const mapX = (value: number) => left + (value - axes.xMin) / Math.max(0.0001, axes.xMax - axes.xMin) * (right - left); const mapY = (value: number) => bottom - (value - axes.yMin) / Math.max(0.0001, axes.yMax - axes.yMin) * (bottom - top); const operations: CanvasOperation[] = [
+    { type: "create_shape", id: `${prefix}-plot-frame`, kind: "rectangle", x, y, width, height, color: "#080808", strokeWidth: 2, fillColor: "#ffffff", fillOpacity: 1, radius: 22 },
+    ...titleOperations(prefix, input.title ?? "Graph", x + 24, y + 18, width - 48),
+    { type: "create_stroke", id: `${prefix}-x-axis`, color: "#080808", size: 2, points: [{ x: left, y: mapY(Math.max(axes.yMin, Math.min(axes.yMax, 0))), pressure: 0.5 }, { x: right, y: mapY(Math.max(axes.yMin, Math.min(axes.yMax, 0))), pressure: 0.5 }] },
+    { type: "create_stroke", id: `${prefix}-y-axis`, color: "#080808", size: 2, points: [{ x: mapX(Math.max(axes.xMin, Math.min(axes.xMax, 0))), y: bottom, pressure: 0.5 }, { x: mapX(Math.max(axes.xMin, Math.min(axes.xMax, 0))), y: top, pressure: 0.5 }] }
+  ];
+  if (axes.xLabel) operations.push({ type: "create_text", id: `${prefix}-x-label`, x: right - 160, y: bottom + 18, width: 160, fontSize: 16, text: caption(axes.xLabel, 22), color: palette.muted, textAlign: "right" });
+  if (axes.yLabel) operations.push({ type: "create_text", id: `${prefix}-y-label`, x: left + 12, y: top - 4, width: 140, fontSize: 16, text: caption(axes.yLabel, 18), color: palette.muted });
+  const colors = ["#2457e6", "#c62828", "#16833b", "#7c3aed", "#080808"];
+  let legendIndex = 0;
+  series.forEach((series, index) => { const id = `${prefix}-series-${index}`; operations.push({ type: "create_stroke", id, color: series.color ?? colors[index % colors.length], size: 3, points: series.points.map((point) => ({ x: mapX(point.x), y: mapY(point.y), pressure: 0.5 })) }); if (series.label) { const column = legendIndex % 2; const row = Math.floor(legendIndex / 2); legendIndex += 1; const columnWidth = (right - left - spacing.md) / 2; operations.push({ type: "create_text", id: `${id}-label`, x: left + column * (columnWidth + spacing.md), y: bottom + padding - legendHeight + spacing.sm + row * 28, width: columnWidth, fontSize: 16, text: caption(series.label, 30), color: series.color ?? colors[index % colors.length] }); } });
+  operations.push({ type: "reorder", ids: [`${prefix}-plot-frame`], direction: "back" }); return operations;
+}
+
+function studyNote(input: VisualCompositionInput, prefix: string): CanvasOperation[] {
+  const x = input.x ?? -470; const y = input.y ?? -320; const width = input.width ?? 940; const sections = input.sections ?? [];
+  const blocks = sections.map((section) => ({
+    heading: measureTextBlock({ text: section.heading, width: width - 56, fontSize: typeScale.heading.fontSize, fontWeight: typeScale.heading.fontWeight, blockStyle: "heading-2", fontFamily: agentFont() }).height,
+    body: measureTextBlock({ text: section.body, width: width - 84, fontSize: typeScale.subheading.fontSize, blockStyle: "bullet", fontFamily: agentFont() }).height
+  }));
+  const pageTitleHeight = measureTextBlock({ text: input.title ?? "Study notes", width: width - 36, fontSize: 28, fontWeight: 700, blockStyle: "heading-2", fontFamily: agentFont() }).height;
+  const contentTop = Math.max(88, 12 + pageTitleHeight + spacing.md);
+  const pageHeight = input.height ?? Math.max(320, contentTop + spacing.lg + blocks.reduce((total, block) => total + block.heading + block.body + spacing.md + spacing.lg, 0));
+  const operations: CanvasOperation[] = [{ type: "create_frame", id: `${prefix}-page`, x, y, width, height: pageHeight, title: input.title ?? "Study notes", renderStyle: agentRender() }];
+  let noteCursor = y + contentTop;
+  sections.forEach((section, index) => {
+    const block = blocks[index];
+    operations.push({ type: "create_text", id: `${prefix}-heading-${index}`, x: x + 28, y: noteCursor, width: width - 56, text: section.heading, fontSize: typeScale.heading.fontSize, fontWeight: typeScale.heading.fontWeight, blockStyle: "heading-2", highlightColor: index === 0 ? palette.highlight : undefined, renderStyle: agentRender() }, { type: "create_text", id: `${prefix}-body-${index}`, x: x + 42, y: noteCursor + block.heading + spacing.xs, width: width - 84, text: section.body, fontSize: typeScale.subheading.fontSize, blockStyle: "bullet", renderStyle: agentRender() });
+    noteCursor += block.heading + block.body + spacing.md + spacing.lg;
+  });
+  return operations;
+}
+
+function timeline(input: VisualCompositionInput, prefix: string): CanvasOperation[] {
+  const nodes = input.nodes ?? []; const x = input.x ?? -480; const y = input.y ?? -100; // Events alternate above and below the axis, so neighbours need half an event card of room each.
+  const width = input.width ?? 960; const span = Math.max(width, (nodes.length - 1) * 230); const gap = span / Math.max(1, nodes.length - 1); const operations = titleOperations(prefix, input.title ?? "Timeline", x, y - Math.max(130, titleBlockHeight(input.title ?? "Timeline", width) + spacing.xl), width);
+  if (nodes.length > 1) operations.push({ type: "create_arrow", id: `${prefix}-axis`, from: { x, y }, to: { x: x + span, y }, color: palette.muted, strokeWidth: 3 });
+  nodes.forEach((node, index) => { const px = x + gap * index; operations.push({ type: "create_shape", id: `${prefix}-dot-${index}`, kind: "ellipse", x: px - 8, y: y - 8, width: 16, height: 16, color: accents[index % accents.length], filled: true, fillColor: accents[index % accents.length], fillOpacity: 1 }, { type: "create_note", id: `${prefix}-event-${index}`, x: px - 105, y: y + (index % 2 ? 44 : -180), width: 210, height: noteHeight(node.detail ? `${node.label}\n${node.detail}` : node.label, 210, undefined, 112), text: node.detail ? `${node.label}\n${node.detail}` : node.label, fillColor: palette.surface, renderStyle: agentRender() }); }); return operations;
+}
+
+function comparison(input: VisualCompositionInput, prefix: string): CanvasOperation[] {
+  const sections = input.sections ?? []; const x = input.x ?? -460; const y = input.y ?? -300; const width = input.width ?? 920; const columns = Math.max(2, Math.min(4, sections.length || 2)); const operations = titleOperations(prefix, input.title ?? "Comparison", x, y, width); const columnWidth = (width - 24 * (columns - 1)) / columns;
+  const columnHeight = input.height ?? sections.reduce((tallest, section) => Math.max(tallest, noteHeight(`${section.heading}\n${section.body}`, columnWidth, "bullet", 200)), 200);
+  sections.forEach((section, index) => operations.push({ type: "create_note", id: `${prefix}-column-${index}`, x: x + index * (columnWidth + 24), y: y + Math.max(72, titleBlockHeight(input.title ?? "Comparison", width) + spacing.lg), width: columnWidth, height: columnHeight, text: `${section.heading}\n${section.body}`, blockStyle: "bullet", fillColor: accentTints[index % accentTints.length], renderStyle: agentRender() })); return operations;
+}
+
+function visualExplainer(input: VisualCompositionInput, prefix: string): CanvasOperation[] {
+  const nodes = input.nodes ?? []; const x = input.x ?? -450; const y = input.y ?? -300; const width = input.width ?? 900;
+  const columns = Math.min(3, Math.max(1, Math.ceil(Math.sqrt(nodes.length || 1)))); const cardWidth = (width - 70 - (columns - 1) * 28) / columns;
+  // The card gets the headline plus one line; explanationSequence keeps the full text as narration.
+  const ideaText = (node: VisualNodeInput): string => { const summary = splitDetail(node.detail).summary; return summary ? `${node.label}\n${summary}` : node.label; };
+  const heights: number[] = [];
+  nodes.forEach((node, index) => { const row = Math.floor(index / columns); heights[row] = Math.max(heights[row] ?? 0, noteHeight(ideaText(node), cardWidth, undefined, 120)); });
+  const explainerTitleHeight = measureTextBlock({ text: input.title ?? "Visual explanation", width: width - 36, fontSize: 28, fontWeight: 700, blockStyle: "heading-2", fontFamily: agentFont() }).height;
+  const ideasTop = Math.max(90, 12 + explainerTitleHeight + spacing.md);
+  const contentHeight = heights.length ? rowOffset(heights, heights.length, spacing.lg) + ideasTop + spacing.md : 240;
+  const operations: CanvasOperation[] = [{ type: "create_frame", id: `${prefix}-frame`, x, y, width, height: input.height ?? Math.max(320, contentHeight), title: input.title ?? "Visual explanation", renderStyle: agentRender() }];
+  nodes.forEach((node, index) => { const row = Math.floor(index / columns); const px = x + 28 + (index % columns) * (cardWidth + 28); const py = y + ideasTop + rowOffset(heights, row, spacing.lg); operations.push({ type: "create_note", id: `${prefix}-idea-${index}`, x: px, y: py, width: cardWidth, height: heights[row], text: ideaText(node), fillColor: index === 0 ? palette.note : palette.surface, renderStyle: agentRender() }); });
+  return operations;
+}
+
+/* ------------------------------------------------------------------ *
+ * Shapes that carry meaning: a conversation, work in flight, a plan.    *
+ * ------------------------------------------------------------------ */
+
+const LANE_PAD = spacing.lg;
+
+/**
+ * A conversation between actors: columns for the participants, one numbered arrow per message,
+ * time running downwards. This is what a process between two parties actually looks like.
+ */
+function sequence(input: VisualCompositionInput, prefix: string): CanvasOperation[] {
+  const actors = input.nodes ?? [];
+  if (!actors.length) return titleOperations(prefix, input.title ?? "Sequence", input.x ?? -520, input.y ?? -320, input.width ?? 900);
+  const messages = (input.edges ?? []).filter((edge) => actors.some((actor) => actor.id === edge.fromId) && actors.some((actor) => actor.id === edge.toId));
+  const x = input.x ?? -520; const y = input.y ?? -320;
+  const title = input.title ?? "Sequence";
+  const top = y + titleBlockHeight(title, input.width ?? 900) + spacing.lg;
+
+  const columns = actors.map((actor) => ({ label: actor.label, width: Math.max(headerWidth(actor.label, 210, agentFont()), cardMinimumWidth(actor)) }));
+  const headerHeight = Math.max(72, ...actors.map((actor) => cardHeight({ ...actor, detail: undefined }, columns[actors.indexOf(actor)].width, 72)));
+  const labelWidth = (message: VisualEdgeInput): number => Math.max(120, measureTextBlock({ text: message.label ?? "", width: 420, fontSize: typeScale.caption.fontSize, fontFamily: agentFont() }).longestLine);
+  const rowHeights = messages.map((message) => Math.round(measureTextBlock({ text: message.label ?? "", width: 420, fontSize: typeScale.caption.fontSize, fontFamily: agentFont() }).height + spacing.xl));
+  const layout = laneLayout({ x: x + LANE_PAD, y: top, columns, rowHeights: rowHeights.length ? rowHeights : [120], gap: spacing.xl, headerHeight, rowGap: spacing.sm });
+  const lifeline = (index: number): number => layout.columns[index].x + layout.columns[index].width / 2;
+  const bottom = layout.y + layout.height + spacing.lg;
+  // A self-message loops out to the right, so the frame has to be wide enough to hold it.
+  const selfReach = messages.some((message) => message.fromId === message.toId) ? 96 + spacing.lg : 0;
+  const frameWidth = Math.max(layout.width + LANE_PAD * 2, layout.columns.at(-1)!.x + layout.columns.at(-1)!.width / 2 + selfReach - x + LANE_PAD);
+
+  const operations: CanvasOperation[] = [
+    { type: "create_frame", id: `${prefix}-frame`, x, y, width: frameWidth, height: bottom - y + LANE_PAD, title, renderStyle: agentRender() }
+  ];
+  actors.forEach((actor, index) => {
+    const header = layout.columnHeader(index);
+    const accent = accents[index % accents.length];
+    operations.push(...cardOperations(prefix, { ...actor, detail: undefined }, header.minX, header.minY, header.maxX - header.minX, header.maxY - header.minY, false, accent));
+    operations.push({ type: "create_path", id: `${prefix}-life-${index}`, points: [{ x: lifeline(index), y: header.maxY + spacing.xs }, { x: lifeline(index), y: bottom }], smooth: false, color: palette.hairline, strokeWidth: 1.5 });
+  });
+
+  const steps: Array<{ id: string; title: string; body?: string; focusElementIds: string[]; revealElementIds: string[]; cameraBounds: { minX: number; minY: number; maxX: number; maxY: number } }> = [];
+  messages.forEach((message, index) => {
+    const from = actors.findIndex((actor) => actor.id === message.fromId);
+    const to = actors.findIndex((actor) => actor.id === message.toId);
+    const row = layout.rows[Math.min(index, layout.rows.length - 1)];
+    const lineY = row.y + row.height - spacing.md;
+    const text = `${index + 1}. ${message.label ?? ""}`.trim();
+    const ids: string[] = [];
+    if (from === to) {
+      // A message an actor sends to itself: out, down and back.
+      const start = lifeline(from); const reach = 96;
+      operations.push({ type: "create_path", id: `${prefix}-msg-${index}`, points: [{ x: start, y: lineY - 24 }, { x: start + reach, y: lineY - 24 }, { x: start + reach, y: lineY }, { x: start + 26, y: lineY }], smooth: false, color: palette.muted, strokeWidth: 2 });
+      operations.push({ type: "create_arrow", id: `${prefix}-msg-${index}-head`, from: { x: start + 26, y: lineY }, to: { x: start + 4, y: lineY }, color: palette.muted, strokeWidth: 2 });
+      operations.push({ type: "create_text", id: `${prefix}-msg-${index}-label`, x: start + spacing.sm, y: lineY - 34 - typeScale.caption.fontSize - spacing.xs, width: Math.max(160, labelWidth(message)), text, fontSize: typeScale.caption.fontSize, color: palette.muted });
+      ids.push(`${prefix}-msg-${index}`, `${prefix}-msg-${index}-label`);
+    } else {
+      const startX = lifeline(from); const endX = lifeline(to);
+      const forward = endX > startX;
+      operations.push({ type: "create_arrow", id: `${prefix}-msg-${index}`, from: { x: startX + (forward ? 6 : -6), y: lineY }, to: { x: endX + (forward ? -6 : 6), y: lineY }, color: forward ? palette.info : palette.positive, strokeWidth: 2.5 });
+      const width = Math.abs(endX - startX) - spacing.lg;
+      operations.push({ type: "create_text", id: `${prefix}-msg-${index}-label`, x: Math.min(startX, endX) + spacing.sm, y: lineY - typeScale.caption.fontSize - spacing.sm, width: Math.max(120, width), text, fontSize: typeScale.caption.fontSize, color: palette.ink, textAlign: "center" });
+      ids.push(`${prefix}-msg-${index}`, `${prefix}-msg-${index}-label`);
+    }
+    steps.push({
+      id: `${prefix}-step-${index}`, title: message.label ?? `Step ${index + 1}`, body: message.detail,
+      focusElementIds: ids, revealElementIds: ids,
+      cameraBounds: { minX: layout.x - LANE_PAD, minY: row.y - spacing.lg, maxX: layout.x + layout.width + LANE_PAD, maxY: row.y + row.height + spacing.lg }
+    });
+  });
+  if (steps.length) operations.push({ type: "set_explanation_sequence", sequence: { id: `${prefix}-sequence`, title, steps } });
+  return operations;
+}
+
+/**
+ * Work in flight: columns of cards. The cards are ordinary notes, so the human drags them between
+ * columns and the next agent turn sees that move as human feedback.
+ */
+/**
+ * How much room a frame title really takes. create_frame lays it out 12px in from the top at size 28,
+ * so a long column name wraps to two lines and lands on whatever was placed under a fixed header.
+ */
+function frameTitleHeight(title: string, width: number): number {
+  return 24 + measureTextBlock({ text: title, width: Math.max(60, width - 36), fontSize: 28, fontWeight: 700, blockStyle: "heading-2", fontFamily: agentFont() }).height;
+}
+
+function board(input: VisualCompositionInput, prefix: string): CanvasOperation[] {
+  const columns = input.columns ?? [];
+  const x = input.x ?? -520; const y = input.y ?? -320;
+  const title = input.title ?? "Board";
+  if (!columns.length) return titleOperations(prefix, title, x, y, input.width ?? 900);
+  const top = y + titleBlockHeight(title, input.width ?? 900) + spacing.lg;
+  const cardWidth = (column: VisualColumnInput): number => Math.max(headerWidth(column.name, 240, agentFont()), ...column.cards.map((card) => cardMinimumWidth({ id: "c", label: card.label, detail: card.detail })));
+  const widths = columns.map((column) => cardWidth(column) + LANE_PAD * 2);
+  const cardHeights = columns.map((column) => column.cards.map((card) => noteHeight(card.detail ? `${card.label}\n${card.detail}` : card.label, widths[columns.indexOf(column)] - LANE_PAD * 2, undefined, 84)));
+  const columnHeight = Math.max(160, ...cardHeights.map((heights) => heights.reduce((total, height) => total + height + spacing.md, 0)));
+  const headerHeight = Math.max(64, ...columns.map((column, index) => frameTitleHeight(`${column.name}  ·  ${column.cards.length}`, widths[index])));
+  const layout = laneLayout({ x, y: top, columns: columns.map((column, index) => ({ label: column.name, width: widths[index] })), rowHeights: [columnHeight + LANE_PAD], gap: spacing.md, headerHeight, rowGap: 0 });
+
+  const operations: CanvasOperation[] = titleOperations(prefix, title, x, y, layout.width);
+  columns.forEach((column, index) => {
+    const header = layout.columnHeader(index);
+    const body = layout.cell(index, 0);
+    operations.push({ type: "create_frame", id: `${prefix}-column-${index}`, x: header.minX, y: header.minY, width: header.maxX - header.minX, height: body.maxY - header.minY, title: `${column.name}  ·  ${column.cards.length}`, color: palette.hairline, semanticRole: "section", name: column.name });
+    let cursor = body.minY + spacing.xs;
+    column.cards.forEach((card, cardIndex) => {
+      const height = cardHeights[index][cardIndex];
+      operations.push({ type: "create_note", id: `${prefix}-card-${index}-${cardIndex}`, x: header.minX + LANE_PAD, y: cursor, width: header.maxX - header.minX - LANE_PAD * 2, height, text: card.detail ? `${card.label}\n${card.detail}` : card.label, fillColor: card.accent ?? palette.surface, renderStyle: agentRender() });
+      cursor += height + spacing.md;
+    });
+  });
+  return operations;
+}
+
+/** What lands when: lanes down the side, periods across the top, bars and milestones in between. */
+function roadmap(input: VisualCompositionInput, prefix: string): CanvasOperation[] {
+  const lanes = input.lanes?.length ? input.lanes : [...new Set((input.items ?? []).map((item) => item.lane))];
+  const periods = input.periods?.length ? input.periods : ["1", "2", "3", "4"];
+  const items = input.items ?? [];
+  const x = input.x ?? -520; const y = input.y ?? -320;
+  const title = input.title ?? "Roadmap";
+  if (!lanes.length) return titleOperations(prefix, title, x, y, input.width ?? 900);
+  const top = y + titleBlockHeight(title, input.width ?? 900) + spacing.lg;
+  const laneColumnWidth = Math.max(...lanes.map((lane) => headerWidth(lane, 160, agentFont())));
+  const periodWidth = Math.max(150, ...periods.map((period) => headerWidth(period, 150, agentFont())));
+  const laneHeight = (lane: string): number => {
+    const labels = items.filter((item) => item.lane === lane).map((item) => measureTextBlock({ text: item.label, width: periodWidth * 2, fontSize: typeScale.caption.fontSize, fontFamily: agentFont() }).height);
+    return Math.round(Math.max(64, ...labels.map((height) => height + spacing.lg)));
+  };
+  const layout = laneLayout({
+    x, y: top, gap: 0, rowGap: 0, headerHeight: 56,
+    columns: [{ label: "", width: laneColumnWidth }, ...periods.map((period) => ({ label: period, width: periodWidth }))],
+    rowHeights: lanes.map(laneHeight)
+  });
+
+  const operations: CanvasOperation[] = titleOperations(prefix, title, x, y, layout.width);
+  periods.forEach((period, index) => {
+    const header = layout.columnHeader(index + 1);
+    operations.push({ type: "create_text", id: `${prefix}-period-${index}`, x: header.minX + spacing.sm, y: header.minY + spacing.sm, width: header.maxX - header.minX - spacing.md, text: period, fontSize: typeScale.caption.fontSize, fontWeight: 700, color: palette.muted, textAlign: "center" });
+    operations.push({ type: "create_path", id: `${prefix}-grid-${index}`, points: [{ x: header.minX, y: header.maxY }, { x: header.minX, y: layout.y + layout.height }], smooth: false, color: palette.hairline, strokeWidth: 1 });
+  });
+  lanes.forEach((lane, index) => {
+    const row = layout.rows[index];
+    operations.push({ type: "create_text", id: `${prefix}-lane-${index}`, x, y: row.y + spacing.sm, width: laneColumnWidth - spacing.sm, text: lane, fontSize: typeScale.detail.fontSize, fontWeight: 600, color: palette.ink });
+    operations.push({ type: "create_path", id: `${prefix}-lane-rule-${index}`, points: [{ x, y: row.y + row.height }, { x: layout.x + layout.width, y: row.y + row.height }], smooth: false, color: palette.hairline, strokeWidth: 1 });
+  });
+  items.forEach((item, index) => {
+    const laneIndex = Math.max(0, lanes.indexOf(item.lane));
+    const row = layout.rows[laneIndex]; if (!row) return;
+    const start = Math.max(0, Math.min(periods.length - 1, Math.round(item.start)));
+    const span = Math.max(1, Math.min(periods.length - start, Math.round(item.span ?? 1)));
+    const cell = layout.cell(start + 1, laneIndex);
+    const accent = accents[laneIndex % accents.length];
+    if (item.milestone) {
+      const size = Math.min(36, row.height - spacing.md);
+      operations.push({ type: "create_shape", id: `${prefix}-item-${index}`, kind: "diamond", x: cell.minX + spacing.sm, y: row.y + (row.height - size) / 2, width: size, height: size, color: accent, fillColor: accent, fillOpacity: 1 });
+      operations.push({ type: "create_text", id: `${prefix}-item-${index}-label`, x: cell.minX + size + spacing.md, y: row.y + (row.height - typeScale.caption.fontSize * 1.3) / 2, width: periodWidth * span, text: item.label, fontSize: typeScale.caption.fontSize, color: palette.ink });
+      operations.push({ type: "group", groupId: `${prefix}-item-${index}-group`, ids: [`${prefix}-item-${index}`, `${prefix}-item-${index}-label`] });
+    } else {
+      const width = periodWidth * span - spacing.sm * 2;
+      const height = Math.max(34, row.height - spacing.lg);
+      operations.push({ type: "create_shape", id: `${prefix}-item-${index}`, kind: "rectangle", x: cell.minX + spacing.sm, y: row.y + (row.height - height) / 2, width, height, color: accent, strokeWidth: 2, fillColor: accentTints[laneIndex % accentTints.length], fillOpacity: 1, radius: radius.card });
+      operations.push({ type: "create_text", id: `${prefix}-item-${index}-label`, x: cell.minX + spacing.md, y: row.y + (row.height - typeScale.caption.fontSize * 1.3) / 2, width: width - spacing.md, text: item.label, fontSize: typeScale.caption.fontSize, color: palette.ink });
+      operations.push({ type: "group", groupId: `${prefix}-item-${index}-group`, ids: [`${prefix}-item-${index}`, `${prefix}-item-${index}-label`] });
+    }
+  });
+  return operations;
+}
+
+
+function layoutVisual(input: VisualCompositionInput, prefix: string): CanvasOperation[] {
+  if (input.kind === "flowchart") return flowchart(input, prefix);
+  if (input.kind === "mindmap") return mindmap(input, prefix);
+  if (input.kind === "ui_wireframe" || input.kind === "ui_mockup") return uiWireframe(input, prefix);
+  if (input.kind === "research_report") return researchReport(input, prefix);
+  if (input.kind === "math_steps") return mathSteps(input, prefix);
+  if (input.kind === "study_note") return studyNote(input, prefix);
+  if (input.kind === "timeline") return timeline(input, prefix);
+  if (input.kind === "comparison") return comparison(input, prefix);
+  if (input.kind === "hierarchy") {
+    const sourceNodes = input.nodes ?? [];
+    const nodes = sourceNodes.map((node, index) => ({ ...node, parentId: node.parentId ?? (index > 0 ? sourceNodes[Math.floor((index - 1) / 2)]?.id : undefined) }));
+    return flowchart({ ...input, kind: "flowchart", nodes }, prefix);
+  }
+  if (input.kind === "sequence") return sequence(input, prefix);
+  if (input.kind === "board") return board(input, prefix);
+  if (input.kind === "roadmap") return roadmap(input, prefix);
+  if (input.kind === "visual_explainer" || input.kind === "guided_explainer") return visualExplainer(input, prefix);
+  return plot(input, prefix);
+}
+
+/** Step cameras are read off the finished geometry, so they point at where the notes ended up. */
+function explanationSequence(input: VisualCompositionInput, prefix: string, operations: CanvasOperation[]): CanvasOperation | null {
+  const nodes = input.nodes ?? [];
+  const resolve = (id: string): string[] => { const index = nodes.findIndex((node) => node.id === id); return index < 0 ? [id] : [`${prefix}-idea-${index}-card`, `${prefix}-idea-${index}-text`]; };
+  const placed = new Map<string, { minX: number; minY: number; maxX: number; maxY: number }>();
+  for (const operation of operations) if (operation.type === "create_note" && operation.id) {
+    const box = { minX: operation.x, minY: operation.y, maxX: operation.x + (operation.width ?? 260), maxY: operation.y + (operation.height ?? 145) };
+    placed.set(`${operation.id}-card`, box); placed.set(`${operation.id}-text`, box);
+  }
+  const cameraFor = (elementIds: string[]): { minX: number; minY: number; maxX: number; maxY: number } | undefined => {
+    const boxes = elementIds.map((id) => placed.get(id)).filter((box): box is NonNullable<typeof box> => Boolean(box));
+    if (!boxes.length) return undefined;
+    const margin = spacing.xl;
+    return { minX: Math.min(...boxes.map((box) => box.minX)) - margin, minY: Math.min(...boxes.map((box) => box.minY)) - margin, maxX: Math.max(...boxes.map((box) => box.maxX)) + margin, maxY: Math.max(...boxes.map((box) => box.maxY)) + margin };
+  };
+  const steps = (input.presentationSteps?.length
+    ? input.presentationSteps.map((step, index) => ({ id: `${prefix}-step-${index}`, title: step.title, body: step.body, focusElementIds: step.focusIds.flatMap(resolve), revealElementIds: (step.revealIds ?? step.focusIds).flatMap(resolve) }))
+    : nodes.map((node, index) => ({ id: `${prefix}-step-${index}`, title: node.label, body: node.detail, focusElementIds: resolve(node.id), revealElementIds: resolve(node.id) }))
+  ).map((step) => ({ ...step, cameraBounds: cameraFor(step.focusElementIds) }));
+  return steps.length ? { type: "set_explanation_sequence", sequence: { id: `${prefix}-sequence`, title: input.title ?? "Guided explanation", steps } } : null;
+}
+
+export interface ComposedVisual { operations: CanvasOperation[]; repairs: Repair[] }
+
+/**
+ * Lay the visual out, then repair it: the human never sees a composed board with text spilling out
+ * of its box or two cards on top of each other, whatever the composer or the input did.
+ */
+export function composeVisualDetailed(input: VisualCompositionInput, style?: AgentStyle): ComposedVisual {
+  return withAgentStyle(style, () => composeInStyle(input));
+}
+
+function composeInStyle(input: VisualCompositionInput): ComposedVisual {
+  const prefix = cleanId(input.id ?? `visual-${crypto.randomUUID()}`);
+  // Every text says which face it is in, so the repair pass measures with the one that renders.
+  const laid = layoutVisual(input, prefix).map((operation) => operation.type === "create_text" ? { ...operation, fontFamily: operation.fontFamily ?? agentFont() } : operation);
+  const { operations, repairs } = repairComposition(laid);
+  if (input.kind === "visual_explainer" || input.kind === "guided_explainer") {
+    const sequence = explanationSequence(input, prefix, operations);
+    if (sequence) operations.push(sequence);
+  }
+  return { operations, repairs };
+}
+
+export function composeVisual(input: VisualCompositionInput): CanvasOperation[] {
+  return composeVisualDetailed(input).operations;
+}

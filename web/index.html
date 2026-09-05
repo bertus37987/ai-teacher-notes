@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#ffffff">
+  <meta name="description" content="A shared infinite whiteboard for people and browser agents.">
+  <title>Shared Whiteboard</title>
+  <link rel="preload" href="./fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="./fonts/caveat-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="./app.css?v=0.15.1">
+</head>
+<body>
+  <main class="workspace" aria-label="Shared infinite whiteboard">
+    <canvas id="board" data-active-tool="pen" aria-label="Infinite canvas"></canvas>
+    <nav class="toolbar" aria-label="Whiteboard tools">
+      <div class="primary-tools">
+        <button type="button" data-tool="pen" aria-label="Pen" title="Pen · P"></button>
+        <button type="button" data-tool="ai-pen" class="ai-tool" aria-label="AI Pen" title="AI Pen · I"></button>
+        <button type="button" data-tool="marker" aria-label="Marker" title="Marker · M"></button>
+        <button type="button" data-tool="eraser" aria-label="Eraser" title="Eraser · E"></button>
+        <button type="button" data-tool="select" aria-label="Select" title="Select · V"></button>
+        <button type="button" data-tool="hand" aria-label="Pan canvas" title="Pan canvas · H"></button>
+        <button type="button" data-tool="text" aria-label="Text field" title="Text field · T"></button>
+        <button type="button" data-tool="sticky" aria-label="Sticky note" title="Sticky note · N"></button>
+        <button type="button" id="image-tool" data-tool="image" aria-label="Image" title="Image"></button>
+        <button type="button" data-tool="artboard" aria-label="Artboard" title="Artboard"></button>
+      </div>
+      <div class="toolbar-divider"></div>
+      <button type="button" id="shapes-toggle" aria-label="Shapes" title="Shapes"></button>
+      <button type="button" data-tool="ai-lasso" class="ai-tool" aria-label="AI Lasso" title="AI Lasso · K — circle objects to send them to the agent"></button>
+      <button type="button" id="color-picker-toggle" class="color-picker-toggle" aria-label="Color" title="Color"><span></span></button>
+      <div class="toolbar-divider secondary-divider"></div>
+      <button type="button" id="undo" class="secondary-action" aria-label="Undo" title="Undo"></button>
+      <button type="button" id="redo" class="secondary-action" aria-label="Redo" title="Redo"></button>
+      <section class="utility" aria-label="View and files">
+        <button type="button" id="fit" aria-label="Fit view" title="Fit view"></button><span id="zoom">100%</span><span id="revision">r0</span>
+        <button type="button" id="export-toggle" aria-label="Export" title="Export">Export</button>
+        <label class="file-label">Import<input id="import-json" type="file" accept="application/json"></label>
+        <button type="button" id="settings-toggle" aria-label="Settings" title="Settings"></button><button type="button" id="clear" aria-label="Clear whiteboard" title="Clear whiteboard"></button>
+      </section>
+    </nav>
+    <section id="shapes-popover" class="popover tool-popover" hidden aria-label="Shapes">
+      <button type="button" data-tool="rectangle" aria-label="Rectangle"></button>
+      <button type="button" data-tool="ellipse" aria-label="Ellipse"></button>
+      <button type="button" data-tool="arrow" aria-label="Arrow"></button>
+      <button type="button" data-tool="select" aria-label="Select"></button>
+      <button type="button" data-tool="lasso" aria-label="Lasso"></button>
+      <button type="button" data-tool="hand" aria-label="Pan canvas"></button>
+    </section>
+    <section id="color-popover" class="popover color-popover" hidden>
+      <div class="swatches" aria-label="Quick colors">
+        <button type="button" data-color="#080808" class="color is-active" aria-label="Black"></button><button type="button" data-color="#2457e6" class="color" aria-label="Blue"></button><button type="button" data-color="#c62828" class="color" aria-label="Red"></button><button type="button" data-color="#16833b" class="color" aria-label="Green"></button><button type="button" data-color="#7c3aed" class="color" aria-label="Purple"></button>
+      </div>
+      <label>Color <input id="color-native" type="color" value="#080808"></label>
+      <label>Hex <input id="color-hex" type="text" value="#080808" maxlength="7" spellcheck="false"></label>
+      <label>Opacity <input id="color-opacity" type="range" min="10" max="100" value="100"></label>
+    </section>
+    <section id="export-popover" class="popover export-popover" hidden><strong>Export</strong><button type="button" data-export="png">PNG · 2×</button><button type="button" data-export="svg">SVG · Vector</button><button type="button" data-export="pdf">PDF · Artboards</button><button type="button" data-export="json">JSON · Editable</button><small>AI Pen, Agent markers and proposal outlines are not exported.</small></section>
+    <section id="settings-popover" class="popover settings-popover" hidden>
+      <h2>Writing tools</h2><label><input id="setting-smoothing" type="checkbox"> Smooth input</label><label><input id="setting-pressure" type="checkbox"> Pen pressure</label><label><input id="setting-auto-shape" type="checkbox"> Improve shapes</label><label><input id="setting-smart-highlight" type="checkbox"> Snap marker to content</label><label><input id="setting-english-assist" type="checkbox"> Make English handwriting agent-readable</label><label><input id="setting-auto-accept" type="checkbox"> Keep agent changes without asking</label><p id="handwriting-support">Runs locally in your browser; no visible text is exchanged.</p>
+      <h2>Appearance</h2><label><input id="setting-clean-style" type="checkbox"> Clean style instead of hand-drawn</label>
+    </section>
+    <section id="selection-tools" class="selection-tools" aria-label="Edit selection" hidden>
+      <button type="button" id="duplicate" aria-label="Duplicate selection" title="Duplicate selection"></button><button type="button" id="send-back" aria-label="Send to back" title="Send to back"></button><button type="button" id="bring-front" aria-label="Bring to front" title="Bring to front"></button>
+      <span class="text-actions"><button type="button" id="edit-text" aria-label="Edit text field"></button><button type="button" id="text-smaller" aria-label="Reduce text size"></button><button type="button" id="text-larger" aria-label="Increase text size"></button></span>
+      <button type="button" id="attach-agent" class="attach-action" aria-label="Attach for agent"></button><button type="button" id="delete-selection" aria-label="Delete selection"></button>
+    </section>
+    <section id="prompt-dock" class="prompt-dock" aria-label="Send whiteboard to agent">
+      <div id="request-scope" class="scope-chips" aria-label="Context"><span>Entire canvas</span></div>
+      <label class="instruction-control"><textarea id="instruction-prompt" rows="1" maxlength="4000" aria-label="Instruction for agent"></textarea></label>
+      <button type="button" id="withdraw-turn" class="withdraw-turn" aria-label="Take the note back" title="Take the note back" hidden></button><button type="button" id="submit-turn" class="submit-arrow" aria-label="Send to agent" title="Send to agent · Ctrl+Enter"></button>
+    </section>
+    <section id="review" class="review" aria-label="Review agent proposal" hidden><span>Review proposal</span><button type="button" id="accept"></button><button type="button" id="undo-agent"></button></section>
+    <section id="explanation-controls" class="explanation-controls" aria-label="Guided explanation" hidden><button type="button" id="explanation-prev" aria-label="Previous step">‹</button><button type="button" id="explanation-overview" title="Show the whole board · Esc">Exit</button><span id="explanation-title"></span><button type="button" id="explanation-next" aria-label="Next step">›</button><p id="explanation-body" class="explanation-body" hidden></p></section>
+    <div class="activity" role="status" aria-live="polite"><span id="status"></span></div>
+    <div id="agent-marker-tip" class="agent-marker-tip" role="tooltip" hidden><span></span>Agent comment · temporary · not exported</div>
+    <input id="image-input" type="file" accept="image/png,image/jpeg" hidden>
+  </main>
+  <script type="module" src="./app.js?v=0.15.1"></script>
+</body>
+</html>
