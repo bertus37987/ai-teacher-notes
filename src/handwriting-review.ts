@@ -1,6 +1,6 @@
 import { HandwritingPage, StrokeElement, TextElement } from "./document";
 import { LocalHandwritingRecognizer, rasterizeLine } from "./htr-client";
-import { reconstructLine, segmentInkLines } from "./htr-core";
+import { planReconstructions, reconstructLine, segmentInkLines } from "./htr-core";
 import { drawText, textFontString } from "./rendering";
 
 /** Preview is an explicit proposal: cancelling or any error leaves all ink untouched. */
@@ -9,7 +9,7 @@ export async function reviewHandwriting(page: HandwritingPage, recognizer: Local
   if (!lines.length) throw new Error("Keine freie Handschrift auf dieser Seite. Zeichne zuerst mit dem Stift.");
   const dialog = document.createElement("dialog"); dialog.className = "hp-review";
   const title = document.createElement("h2"); title.textContent = "Handschrift lesbar machen";
-  const note = document.createElement("p"); note.textContent = "Lokales deutsches ML-Modell · Bitte jede Zeile prüfen. Formeln und Zeichnungen abwählen. Rekonstruktion in Caveat, nicht in deiner persönlichen Schrift. Originalstriche bleiben gespeichert.";
+  const note = document.createElement("p"); note.textContent = "Lokales deutsches ML-Modell · Bitte jede Zeile prüfen. Formeln und Zeichnungen abwählen. Rekonstruktion in Caveat, nicht in deiner persönlichen Schrift. Originalstriche bleiben gespeichert. Größere Zeilen werden bei Bedarf weiter unten platziert; andere Notizen werden nicht verschoben oder überdeckt.";
   const status = document.createElement("p"); status.setAttribute("role", "status");
   const rows = document.createElement("div");
   const actions = document.createElement("div"); actions.className = "hp-dialog-actions";
@@ -54,7 +54,7 @@ export async function reviewHandwriting(page: HandwritingPage, recognizer: Local
       try {
         const selected = entries.filter(e => e.check.checked);
         if (!selected.length) { status.textContent = "Bitte mindestens eine geprüfte Zeile auswählen."; return; }
-        finish(selected.map(e => e.proposal()));
+        finish(planReconstructions(page, selected.map(e => e.proposal())));
       } catch (error) { status.textContent = error instanceof Error ? error.message : String(error); }
     };
     dialog.showModal();

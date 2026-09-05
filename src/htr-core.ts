@@ -74,10 +74,43 @@ export function reconstructLine(page: HandwritingPage, line: InkLine, text: stri
   };
 }
 
+/** Place larger reconstructed lines without resizing glyphs or moving existing work. */
+export function planReconstructions(page: HandwritingPage, replacements: TextElement[]): TextElement[] {
+  const remove = new Set<string>();
+  for (const replacement of replacements) {
+    if (!replacement.reconstruction?.originalStrokes.length) throw new Error("Originalstriche fehlen");
+    for (const original of replacement.reconstruction.originalStrokes) {
+      if (remove.has(original.id)) throw new Error("Ein Strich wurde mehrfach ausgewählt");
+      const current = page.elements.find(e => e.id === original.id);
+      if (!current || current.locked || JSON.stringify(current) !== JSON.stringify(original)) throw new Error("Die Handschrift hat sich geändert. Bitte neu erkennen.");
+      remove.add(original.id);
+    }
+  }
+  // Images and marker backgrounds are intentionally writable; text, ink and geometry are obstacles.
+  const occupied = page.elements.filter(e => !remove.has(e.id) && e.type !== "image" && e.type !== "highlight").map(elementBounds);
+  const placed: TextElement[] = [];
+  for (const input of [...replacements].sort((a, b) => a.baseline - b.baseline || a.x - b.x)) {
+    const text = structuredClone(input);
+    let box = elementBounds(text);
+    if (![box.minX, box.minY, box.maxX, box.maxY].every(Number.isFinite) || box.minX < 0 || box.maxX > page.width || text.width <= 0 || (text.height ?? 0) <= 0) throw new Error("Ungültige Textfläche");
+    if (box.minY < 8) { text.baseline += 8 - box.minY; box = elementBounds(text); }
+    for (;;) {
+      const hits = occupied.filter(b => box.minX < b.maxX + 8 && box.maxX > b.minX - 8 && box.minY < b.maxY + 8 && box.maxY > b.minY - 8);
+      if (!hits.length) break;
+      text.baseline += Math.max(...hits.map(b => b.maxY)) + 8 - box.minY;
+      box = elementBounds(text);
+    }
+    if (box.maxY > page.height - 8) throw new Error("Die lesbare Schrift braucht mehr Platz. Bitte weniger Zeilen auswählen oder eine neue Seite verwenden. Das Original bleibt erhalten.");
+    occupied.push(box); placed.push(text);
+  }
+  return placed;
+}
+
 export function applyReconstructions(page: HandwritingPage, replacements: TextElement[]): void {
+  const placed = planReconstructions(page, replacements);
   const remove = new Set(replacements.flatMap(r => r.reconstruction?.originalStrokes.map(s => s.id) ?? []));
   page.elements = page.elements.filter(e => !remove.has(e.id));
-  page.elements.push(...replacements);
+  page.elements.push(...placed);
 }
 
 export function restoreReconstructions(page: HandwritingPage): number {
