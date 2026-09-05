@@ -1,5 +1,7 @@
 # Smooth Handwriting 0.16.0 — Preview, keine finale Freigabe
 
+Aktuelles Update: [0.16.1 behebt gequetschte Schrift](HANDWRITING_FIX_0.16.1.md). Aktuelles Paket: `plugin-dist/smooth-handwriting-0.16.1-preview.zip`. Die nachfolgenden Abnahmegrenzen bleiben bestehen.
+
 ## Installation in einem Test-Vault
 
 1. Eigenen neuen Test-Vault verwenden. Bestehende `smooth-handwriting`-Installation vorher sichern; kein automatisches Überschreiben persönlicher Vaults.

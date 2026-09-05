@@ -229,7 +229,7 @@ const slopedWord = [
 const normalized = normalizeHandwritingWord(slopedWord, { targetHeight: 48, samples: 8, averageSlope: 0 }, "blank");
 const firstBottom = Math.max(...normalized.strokes[0].points.map((candidate) => candidate.y));
 const secondBottom = Math.max(...normalized.strokes[1].points.map((candidate) => candidate.y));
-assert.ok(Math.abs(firstBottom - secondBottom) < 2, "word strokes should share one baseline");
+assert.equal(secondBottom - firstBottom, 8, "geometric cleanup must not shear letters onto a guessed baseline");
 assert.ok(normalized.profile.samples === 9);
 
 const nextWord = [
@@ -245,17 +245,18 @@ const stableProfile = { targetHeight: 52, samples: 0, averageSlope: 0 };
 const normalizedTall = normalizeHandwritingWord(tallWord, stableProfile, "blank");
 const normalizedShort = normalizeHandwritingWord(shortWord, stableProfile, "blank");
 const resultHeight = (word: typeof normalizedTall.strokes): number => Math.max(...word.flatMap((item) => item.points.map((candidate) => candidate.y))) - Math.min(...word.flatMap((item) => item.points.map((candidate) => candidate.y)));
-assert.ok(Math.abs(resultHeight(normalizedTall.strokes) - resultHeight(normalizedShort.strokes)) < 18, "very different input sizes converge toward one handwriting size");
+assert.equal(resultHeight(normalizedTall.strokes), 100, "large handwriting must not shrink to a learned size");
+assert.equal(resultHeight(normalizedShort.strokes), 30, "small handwriting must not be stretched");
 
 const gridWord = [{ ...stroke([point(10, 50), point(15, 20), point(20, 51)]), type: "stroke" as const, id: "grid" }];
 const normalizedGrid = normalizeHandwritingWord(gridWord, { targetHeight: 80, samples: 12, averageSlope: 0 }, "grid");
-assert.equal(normalizedGrid.baseline, 48, "grid baselines use the visible 24-unit grid");
-assert.ok(Math.abs(resultHeight(normalizedGrid.strokes) - 24 * 0.72) < 0.01, "grid writing height is derived from the visible grid rather than an old profile");
+assert.equal(normalizedGrid.baseline, 51, "do not jump more than two pixels to a grid line");
+assert.equal(resultHeight(normalizedGrid.strokes), 31, "grid is not a target font size");
 const lineWord = [{ ...stroke([point(10, 89), point(15, 20), point(20, 90)]), type: "stroke" as const, id: "line" }];
 const normalizedLine = normalizeHandwritingWord(lineWord, { targetHeight: 96, samples: 20, averageSlope: 0 }, "lines");
-assert.equal(normalizedLine.baseline, 96, "lined writing always lands exactly on a visible 32-unit line");
-assert.ok(Math.abs(resultHeight(normalizedLine.strokes) - 32 * 0.72) < 0.01, "lined writing body fits inside one paper row");
-assert.equal(normalizedLine.profile.targetHeight, 96, "ruled paper does not overwrite the personal blank-paper profile");
+assert.equal(normalizedLine.baseline, 90, "do not force large handwriting into a paper row");
+assert.equal(resultHeight(normalizedLine.strokes), 70, "lined paper preserves input size");
+assert.equal(normalizedLine.profile.targetHeight, 70, "record observed size without imposing a target");
 
 const proportionalStroke = [{ ...stroke([point(0, 100), point(0, 20), point(50, 100)]), type: "stroke" as const, id: "proportional" }];
 const proportional = normalizeHandwritingWord(proportionalStroke, { targetHeight: 90, samples: 2, averageSlope: 0 }, "lines");
@@ -277,7 +278,7 @@ assert.ok(Math.abs((centre(separatedResult[1]) - centre(separatedResult[0])) - 1
 const wobblyStem = [{ ...stroke([point(50, 100), point(54, 82), point(47, 63), point(53, 41), point(49, 20)]), type: "stroke" as const, id: "stem" }];
 const straightStem = normalizeHandwritingWord(wobblyStem, { targetHeight: 52, samples: 1, averageSlope: 0 }, "lines").strokes[0];
 const stemWidth = (candidate: typeof straightStem): number => Math.max(...candidate.points.map((item) => item.x)) - Math.min(...candidate.points.map((item) => item.x));
-assert.ok(stemWidth(straightStem) < stemWidth(wobblyStem[0]) * 0.45, "long h/i/l stems are straightened without replacing the stroke");
+assert.equal(stemWidth(straightStem), stemWidth(wobblyStem[0]), "do not collapse a stem before recognizing the letter");
 
 const squashedLoopPoints = Array.from({ length: 25 }, (_, index) => {
   const angle = index / 24 * Math.PI * 2; return point(100 + Math.cos(angle) * 22, 80 + Math.sin(angle) * 42);
@@ -285,8 +286,8 @@ const squashedLoopPoints = Array.from({ length: 25 }, (_, index) => {
 squashedLoopPoints[squashedLoopPoints.length - 1] = point(102, 81);
 const squashedLoop = [{ ...stroke(squashedLoopPoints), type: "stroke" as const, id: "loop" }];
 const roundedLoop = normalizeHandwritingWord(squashedLoop, { targetHeight: 52, samples: 1, averageSlope: 0 }, "lines").strokes[0];
-assert.ok(Math.abs(boxRatio([roundedLoop]) - 1) < Math.abs(boxRatio(squashedLoop) - 1), "closed o/0 loops become rounder instead of vertically squeezed");
-assert.deepEqual([roundedLoop.points.at(-1)?.x, roundedLoop.points.at(-1)?.y], [roundedLoop.points[0].x, roundedLoop.points[0].y], "small o/0 pen-lift gaps are closed");
+assert.equal(boxRatio([roundedLoop]), boxRatio(squashedLoop), "geometry alone cannot decide whether a loop is o, e or a drawing");
+assert.deepEqual(roundedLoop.points, squashedLoop[0].points, "preserve letter contour until semantic reconstruction is confirmed");
 
 const v2 = { version: 2, pages: fresh.pages };
 const migratedV2 = parseDocument(v2);

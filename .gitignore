@@ -5,6 +5,7 @@ web-dist/
 *.zip
 *.log
 plugin-dist/
+plugin-backups/
 lab-dist/
 .env
 .env.*

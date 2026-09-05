@@ -1,6 +1,7 @@
 import { HandwritingPage, StrokeElement, TextElement } from "./document";
 import { LocalHandwritingRecognizer, rasterizeLine } from "./htr-client";
 import { reconstructLine, segmentInkLines } from "./htr-core";
+import { drawText, textFontString } from "./rendering";
 
 /** Preview is an explicit proposal: cancelling or any error leaves all ink untouched. */
 export async function reviewHandwriting(page: HandwritingPage, recognizer: LocalHandwritingRecognizer): Promise<TextElement[] | null> {
@@ -24,8 +25,25 @@ export async function reviewHandwriting(page: HandwritingPage, recognizer: Local
     const input = document.createElement("input"); input.type = "text"; input.maxLength = 500; input.setAttribute("aria-label", `Erkannter Text Zeile ${i + 1}`);
     input.placeholder = "Erkennung läuft …";
     const hint = document.createElement("small");
-    row.append(label, preview, input, hint); rows.append(row);
-    return { line, check, input, hint };
+    const sizeLabel = document.createElement("label"); sizeLabel.textContent = "Schriftgröße (100 % = an deiner Eingabe orientiert)";
+    const size = document.createElement("input"); size.type = "range"; size.min = "75"; size.max = "175"; size.step = "5"; size.value = "100"; size.setAttribute("aria-label", `Schriftgröße Zeile ${i + 1}`); sizeLabel.append(size);
+    const result = document.createElement("canvas"); result.style.width = "100%"; result.style.height = "auto"; result.setAttribute("aria-label", `Rekonstruktion Zeile ${i + 1}`);
+    const ctx = result.getContext("2d")!;
+    const proposal = (): TextElement => reconstructLine(page, line, input.value, Number(size.value) / 100, (value, fontSize) => {
+      ctx.font = textFontString({fontSize}, '"Teacher Caveat", cursive'); return ctx.measureText(value).width;
+    });
+    const refresh = (): void => {
+      if (!input.value.trim()) return;
+      try {
+        const text = proposal(); result.width = Math.ceil(text.width); result.height = Math.ceil(text.height! + text.fontSize * .3);
+        ctx.fillStyle = "white"; ctx.fillRect(0, 0, result.width, result.height);
+        drawText(ctx, { ...text, x: 0, baseline: text.fontSize }, '"Teacher Caveat", cursive');
+        hint.textContent = `${size.value} % · ${Math.round(text.fontSize)} px · natürlicher Buchstabenabstand, Umbruch statt Quetschen`;
+      } catch (error) { ctx.clearRect(0, 0, result.width, result.height); hint.textContent = error instanceof Error ? error.message : String(error); }
+    };
+    input.oninput = refresh; size.oninput = refresh;
+    row.append(label, preview, input, sizeLabel, result, hint); rows.append(row);
+    return { line, check, input, hint, proposal, refresh };
   });
   return new Promise(resolve => {
     let closed = false;
@@ -36,14 +54,14 @@ export async function reviewHandwriting(page: HandwritingPage, recognizer: Local
       try {
         const selected = entries.filter(e => e.check.checked);
         if (!selected.length) { status.textContent = "Bitte mindestens eine geprüfte Zeile auswählen."; return; }
-        finish(selected.map(e => reconstructLine(page, e.line, e.input.value)));
+        finish(selected.map(e => e.proposal()));
       } catch (error) { status.textContent = error instanceof Error ? error.message : String(error); }
     };
     dialog.showModal();
     void (async () => {
       for (let i = 0; i < entries.length && !closed; i++) {
         const entry = entries[i]; status.textContent = `Erkenne Zeile ${i + 1} von ${entries.length} …`;
-        try { const text = await recognizer.recognize(entry.line); if (closed) return; entry.input.value = text; entry.hint.textContent = "Prüfen, gegebenenfalls korrigieren und zum Übernehmen anhaken."; }
+        try { const text = await recognizer.recognize(entry.line); if (closed) return; entry.input.value = text; entry.refresh(); }
         catch (error) { if (closed) return; entry.hint.textContent = `Keine sichere Erkennung: ${error instanceof Error ? error.message : String(error)} Du kannst die Zeile selbst eingeben.`; }
         entry.input.placeholder = "Text prüfen oder selbst eingeben";
       }

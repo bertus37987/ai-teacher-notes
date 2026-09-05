@@ -10,6 +10,7 @@ import { LocalHandwritingRecognizer } from "./htr-client";
 import { reviewHandwriting } from "./handwriting-review";
 import { applyReconstructions, restoreReconstructions } from "./htr-core";
 import { constructionDialog } from "./construction-dialog";
+import { drawText } from "./rendering";
 
 type Tool = "pen" | "highlight" | "eraser" | "laser" | "fill" | ShapeDragTool;
 
@@ -162,8 +163,7 @@ function drawPageElements(context: CanvasRenderingContext2D, page: HandwritingPa
     if (element.type === "stroke") drawInkStroke(context, element);
     else if (element.type === "shape") drawShape(context, element);
     else if (element.type === "text") {
-      context.fillStyle = visibleInkColor(element.color); context.font = `${element.fontSize}px "Teacher Caveat", "Segoe Print", cursive`;
-      context.textBaseline = "alphabetic"; context.fillText(element.text, element.x, element.baseline, element.width);
+      drawText(context, element, '"Teacher Caveat", "Segoe Print", cursive');
     }
   }
 }

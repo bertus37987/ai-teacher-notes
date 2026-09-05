@@ -1,4 +1,5 @@
 import { elementBounds, HandwritingPage, StrokeElement, TextElement } from "./document";
+import { TEXT_LINE_HEIGHT } from "./rendering";
 
 export const HTR_MODEL = "naeyn/de-htr-web-v2@6241c1ff";
 export interface InkLine { strokes: StrokeElement[]; minX: number; minY: number; maxX: number; maxY: number }
@@ -39,15 +40,36 @@ export function decodeCtc(logits: ArrayLike<number>, dims: readonly number[], al
   return text.trim();
 }
 
-export function reconstructLine(page: HandwritingPage, line: InkLine, text: string): TextElement {
+export function reconstructLine(page: HandwritingPage, line: InkLine, text: string, sizeScale = 1, measure?: (text: string, fontSize: number) => number): TextElement {
   if (!text.trim() || text.length > 500) throw new Error("Bitte 1–500 Zeichen pro Zeile bestätigen");
   if (!line.strokes.every(s => page.elements.some(e => e.id === s.id && JSON.stringify(e) === JSON.stringify(s)))) throw new Error("Die Handschrift hat sich geändert. Bitte neu erkennen.");
   const originals = structuredClone(line.strokes);
-  const fontSize = Math.max(22, Math.min(80, (line.maxY - line.minY) * 1.35));
+  if (!Number.isFinite(sizeScale) || sizeScale < 0.75 || sizeScale > 1.75) throw new Error("Ungültige Schriftgröße");
+  const fontSize = Math.max(22, (line.maxY - line.minY) * 1.35) * sizeScale;
+  const width = page.width - line.minX - 16;
+  const fits = measure ?? ((value: string, size: number) => Array.from(value).length * size * 0.55);
+  const lines: string[] = [];
+  for (const paragraph of text.trim().split("\n")) {
+    let current = "";
+    for (const word of paragraph.split(/\s+/).filter(Boolean)) {
+      const candidate = current ? `${current} ${word}` : word;
+      if (fits(candidate, fontSize) <= width) { current = candidate; continue; }
+      if (current) { lines.push(current); current = ""; }
+      for (const character of Array.from(word)) {
+        if (fits(character, fontSize) > width) throw new Error("Am Seitenrand fehlt Platz. Bitte die Handschrift weiter links platzieren.");
+        if (current && fits(current + character, fontSize) > width) { lines.push(current); current = ""; }
+        current += character;
+      }
+    }
+    lines.push(current);
+  }
+  const baseline = line.minY + fontSize * 0.8;
+  const height = fontSize * TEXT_LINE_HEIGHT * lines.length;
+  if (baseline - fontSize + height > page.height - 8) throw new Error("Für lesbare Schrift fehlt unten Platz. Bitte eine neue Seite verwenden oder die Größe selbst anpassen.");
   return {
-    type: "text", id: crypto.randomUUID(), x: line.minX, baseline: line.minY + fontSize * 0.8,
-    width: Math.max(20, page.width - line.minX - 16), fontSize, color: line.strokes[0].color,
-    fontFamily: "handwriting", text: text.trim(),
+    type: "text", id: crypto.randomUUID(), x: line.minX, baseline,
+    width, height, fontSize, color: line.strokes[0].color,
+    fontFamily: "handwriting", text: lines.join("\n"),
     reconstruction: { model: HTR_MODEL, originalStrokes: originals, originalIndices: originals.map(s => page.elements.findIndex(e => e.id === s.id)), confirmedAt: new Date().toISOString() }
   };
 }
