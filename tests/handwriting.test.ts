@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createDocument, parseDocument, StrokeElement } from "../src/document";
 import { applyReconstructions, decodeCtc, planReconstructions, reconstructLine, restoreReconstructions, segmentInkLines } from "../src/htr-core";
-import { constructGeometry } from "../src/geometry-tools";
+import { constructGeometry, aimConstruction } from "../src/geometry-tools";
 import { normalizeHandwritingWord } from "../src/handwriting-normalizer";
 import { drawText } from "../src/rendering";
 import { browserWorkerSource } from "../src/htr-client";
@@ -23,6 +23,19 @@ const classes = [1, 1, 0, 1, 2, 2, 0]; const logits = classes.flatMap(c => [0, 1
 assert.equal(decodeCtc(logits, [1, 7, 3], "ab"), "aab");
 assert.throws(() => decodeCtc(logits, [1, 7, 4], "ab"), /Alphabet/);
 const base = { x: 300, y: 400, length: 100, angle: 30, sweep: 360, edge: 0 as const };
+const aimedCircle = aimConstruction(base, 360, 480, "compass");
+assert.equal(aimedCircle.length, 100);
+assert.equal(aimedCircle.x, 300); assert.equal(aimedCircle.y, 400);
+assert.equal(base.angle, 30, "aiming must not mutate its input");
+for (const edge of [0, 45, 135] as const) {
+  const aimed = aimConstruction({ ...base, edge }, 360, 480, "set-square");
+  const result = constructGeometry("set-square", aimed, "#111", 3);
+  assert.ok(Math.abs(result.points[1].x - 360) < 1e-9);
+  assert.ok(Math.abs(result.points[1].y - 480) < 1e-9);
+}
+assert.equal(aimConstruction(base, 300, 400, "compass"), base, "anchor click retains valid radius");
+assert.equal(aimConstruction(base, NaN, 400, "compass"), base);
+assert.equal(aimConstruction(base, 9000, 400, "compass").length, 4000);
 const line = constructGeometry("set-square", base, "#111", 3);
 assert.ok(Math.abs(Math.hypot(line.points[1].x - 300, line.points[1].y - 400) - 100) < 1e-9);
 assert.ok(Math.abs(line.points[1].y - 450) < 1e-9);

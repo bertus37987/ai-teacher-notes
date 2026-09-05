@@ -2,6 +2,14 @@ import { ShapeElement } from "./document";
 import { InkPoint } from "./strokes";
 
 export interface Construction { x: number; y: number; angle: number; length: number; sweep: number; edge: 0 | 45 | 135 }
+/** Keep the anchor fixed while positioning the compass arm or selected ruler edge. */
+export function aimConstruction(c: Construction, x: number, y: number, kind: "set-square" | "compass"): Construction {
+  if (![x, y, c.x, c.y].every(Number.isFinite)) return c;
+  const length = Math.hypot(x - c.x, y - c.y);
+  if (length < 1) return c;
+  const angle = Math.atan2(y - c.y, x - c.x) * 180 / Math.PI - (kind === "set-square" ? c.edge : 0);
+  return { ...c, length: Math.min(4000, length), angle };
+}
 const point = (x: number, y: number): InkPoint => ({ x, y, pressure: 0.5 });
 export function constructGeometry(kind: "set-square" | "compass", c: Construction, color: string, size: number): ShapeElement {
   if (![c.x, c.y, c.angle, c.length, c.sweep].every(Number.isFinite) || c.length <= 0 || c.length > 4000 || c.sweep <= 0 || c.sweep > 360 || ![0, 45, 135].includes(c.edge)) throw new Error("Ungültige Konstruktionsmaße");
