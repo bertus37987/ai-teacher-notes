@@ -11,6 +11,8 @@ import { reviewHandwriting } from "./handwriting-review";
 import { applyReconstructions, restoreReconstructions } from "./htr-core";
 import { constructionDialog } from "./construction-dialog";
 import { drawText } from "./rendering";
+import { drawLiveInk } from "./live-ink";
+import { textDialog } from "./text-dialog";
 
 type Tool = "pen" | "highlight" | "eraser" | "laser" | "fill" | ShapeDragTool;
 
@@ -44,8 +46,9 @@ function prepareCanvas(canvas: HTMLCanvasElement, page: HandwritingPage): Canvas
   const rect = canvas.getBoundingClientRect();
   if (rect.width <= 0 || rect.height <= 0) return null;
   const ratio = window.devicePixelRatio || 1;
-  canvas.width = Math.round(rect.width * ratio);
-  canvas.height = Math.round(rect.height * ratio);
+  const width = Math.round(rect.width * ratio), height = Math.round(rect.height * ratio);
+  if (canvas.width !== width) canvas.width = width;
+  if (canvas.height !== height) canvas.height = height;
   const context = canvas.getContext("2d");
   if (!context) return null;
   context.setTransform(canvas.width / page.width, 0, 0, canvas.height / page.height, 0, 0);
@@ -163,7 +166,7 @@ function drawPageElements(context: CanvasRenderingContext2D, page: HandwritingPa
     if (element.type === "stroke") drawInkStroke(context, element);
     else if (element.type === "shape") drawShape(context, element);
     else if (element.type === "text") {
-      drawText(context, element, '"Teacher Caveat", "Segoe Print", cursive');
+      drawText(context, element, element.fontFamily === "sans" ? undefined : '"Teacher Caveat", "Segoe Print", cursive');
     }
   }
 }
@@ -212,6 +215,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
   private readonly canvases = new Map<string, HTMLCanvasElement>();
   private observers: ResizeObserver[] = [];
   private history: HandwritingDocumentV3[] = [];
+  private future: HandwritingDocumentV3[] = [];
   private currentElementId: string | null = null;
   private currentRawPoints: InkPoint[] = [];
   private pointerPageId: string | null = null;
@@ -243,7 +247,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     const keyHandler = (event: KeyboardEvent): void => {
       if (document.querySelector("dialog[open]") || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
       if (event.key === "Escape" && this.editing) this.setEditing(false);
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z" && this.editing) { event.preventDefault(); this.undo(); }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z" && this.editing) { event.preventDefault(); if (event.shiftKey) this.redo(); else this.undo(); }
     };
     document.addEventListener("keydown", keyHandler);
     this.register(() => document.removeEventListener("keydown", keyHandler));
@@ -255,6 +259,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
 
   onunload(): void {
     this.recognizer?.dispose();
+    if (this.pointerPageId) { this.dirty = true; this.pointerPageId = null; }
     this.restoreFromPortal();
     this.disconnectObservers();
     document.body.removeClass("hp-editor-open");
@@ -270,6 +275,8 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     header.createSpan({ cls: "hp-inline-title", text: "Smooth Handwriting" });
     this.pageCountEl = header.createSpan("hp-page-count");
     this.statusEl = header.createSpan("hp-status");
+    const toolsToggle = header.createEl("button", { cls: "hp-tools-toggle", text: "Werkzeuge", attr: { "aria-expanded": "true" } });
+    toolsToggle.onclick = () => { const hidden = this.wrapper.classList.toggle("is-tools-hidden"); toolsToggle.setAttribute("aria-expanded", String(!hidden)); requestAnimationFrame(() => this.redrawAll()); };
     this.deleteButton = header.createEl("button", { cls: "hp-delete-button", text: "Alles löschen", attr: { "aria-label": "Gesamte Handschriftnotiz leeren", title: "Alle Seiten leeren (mit Rückgängig wiederherstellbar)" } });
     this.deleteButton.addEventListener("click", () => this.clearAll());
     this.editButton = header.createEl("button", { cls: "mod-cta", text: "Bearbeiten" });
@@ -284,8 +291,10 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
   }
 
   private labeledControl(label: string): HTMLDivElement {
-    const group = this.toolbar.createDiv("hp-tool-group");
-    group.createSpan({ cls: "hp-tool-label", text: label });
+    const section = this.toolbar.createEl("details", { cls: "hp-tool-section" });
+    section.open = ["Werkzeug", "Handschrift", "Konstruieren"].includes(label);
+    section.createEl("summary", { text: label });
+    const group = section.createDiv("hp-tool-group");
     return group;
   }
 
@@ -294,10 +303,13 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     const toolGroup = this.labeledControl("Werkzeug");
     const tools: Array<[Tool, string, string]> = [["pen", "✎", "Stift"], ["highlight", "▰", "Intelligenter Markierer"], ["eraser", "⌫", "Radierer"], ["fill", "▣", "Geschlossene Form mit Stifttipp füllen"], ["laser", "●", "Präsentationsstift (nur beim Halten)"]];
     for (const [tool, icon, label] of tools) {
-      const button = toolGroup.createEl("button", { text: icon, attr: { "aria-label": label, title: label } });
+      const button = toolGroup.createEl("button", { text: `${icon} ${label === "Intelligenter Markierer" ? "Marker" : label === "Geschlossene Form mit Stifttipp füllen" ? "Füllen" : label === "Präsentationsstift (nur beim Halten)" ? "Laser" : label}`, attr: { "aria-label": label, title: label } });
       button.addEventListener("click", () => this.activateTool(tool));
       this.toolButtons.set(tool, button);
     }
+    toolGroup.createEl("button", { text: "T Text", attr: { "aria-label": "Text einfügen" } }).onclick = () => void this.insertText();
+    toolGroup.createEl("button", { text: "↶ Zurück", attr: { "aria-label": "Rückgängig" } }).onclick = () => this.undo();
+    toolGroup.createEl("button", { text: "↷ Wiederholen", attr: { "aria-label": "Wiederholen", title: "Strg/⌘ + Umschalt + Z" } }).onclick = () => this.redo();
     const writing = this.labeledControl("Handschrift");
     writing.addClass("hp-text-controls");
     const writingLabel = writing.createEl("label", { text: "Buchstaben schützen" });
@@ -318,7 +330,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
       ["ellipse", "⬭", "Oval"], ["circle", "○", "Kreis"], ["triangle", "△", "Dreieck"], ["diamond", "◇", "Raute"]
     ];
     for (const [tool, icon, label] of shapeTools) {
-      const button = shapeGroup.createEl("button", { text: icon, attr: { "aria-label": label, title: `${label} ziehen` } });
+      const button = shapeGroup.createEl("button", { text: `${icon} ${label}`, attr: { "aria-label": label, title: `${label} ziehen` } });
       button.addEventListener("click", () => this.activateTool(tool));
       this.toolButtons.set(tool, button);
     }
@@ -331,7 +343,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     const penColor = colorGroup.createEl("input", { type: "color", value: this.plugin.settings.penColor, attr: { "aria-label": "Eigene Stiftfarbe" } });
     penColor.addEventListener("input", () => { this.plugin.settings.penColor = penColor.value; void this.plugin.persistSettings(); this.updateReticleStyle(); });
     const sizeGroup = this.labeledControl("Stärke");
-    const size = sizeGroup.createEl("input", { type: "range", value: String(this.plugin.settings.penSize), attr: { min: "1", max: "18", step: "0.5" } });
+    const size = sizeGroup.createEl("input", { type: "range", value: String(this.plugin.settings.penSize), attr: { min: "1", max: "18", step: "0.5", "aria-label": "Stiftstärke" } });
     size.addEventListener("input", () => { this.plugin.settings.penSize = Number(size.value); void this.plugin.persistSettings(); this.updateReticleStyle(); });
     const fillGroup = this.labeledControl("Formfüllung");
     const fill = fillGroup.createEl("input", { type: "color", value: this.plugin.settings.fillColor, attr: { "aria-label": "Füllfarbe" } });
@@ -366,8 +378,8 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
       this.remember(); page.width = width; page.height = height; page.format = format.value as HandwritingPage["format"]; alignPageBaselines(page); this.rebuildPages(); this.markChanged(); format.value = "";
     };
     pageGroup.createEl("button", { text: "+", attr: { "aria-label": "Seite hinzufügen", title: "Seite hinzufügen" } }).addEventListener("click", () => this.addPage());
-    pageGroup.createEl("button", { text: "↶", attr: { "aria-label": "Rückgängig", title: "Rückgängig" } }).addEventListener("click", () => this.undo());
     const fileGroup = this.labeledControl("Datei");
+    fileGroup.createEl("button", { text: "Notiz leeren", attr: { "aria-label": "Notiz leeren" } }).onclick = () => this.clearAll();
     for (const [format, label] of [["png", "PNG"], ["jpeg", "JPG"], ["pdf", "PDF"]] as const) {
       fileGroup.createEl("button", { text: label, attr: { "aria-label": `Aktive Seite als ${label} speichern`, title: `Aktive Seite als ${label} herunterladen` } })
         .addEventListener("click", () => void this.exportActivePage(format));
@@ -428,7 +440,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
   private activateTool(tool: Tool): void {
     this.tool = tool;
     this.wrapper.dataset.tool = tool;
-    for (const [candidate, button] of this.toolButtons) button.toggleClass("is-active", candidate === tool);
+    for (const [candidate, button] of this.toolButtons) { button.toggleClass("is-active", candidate === tool); button.setAttribute("aria-pressed", String(candidate === tool)); }
     this.updateReticleStyle();
   }
 
@@ -553,7 +565,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     if (!this.editing || this.pointerPageId !== pageId) return;
     const page = this.page(pageId); const canvas = this.canvases.get(pageId);
     if (!page || !canvas || !canvas.hasPointerCapture(event.pointerId)) return;
-    event.preventDefault(); const events = event.getCoalescedEvents?.() ?? [event];
+    event.preventDefault(); const coalesced = event.getCoalescedEvents?.(); const events = coalesced?.length ? coalesced : [event];
     if (this.tool === "laser" && this.transientLaser) {
       for (const sample of events) this.transientLaser.points.push(this.toPoint(sample, page, canvas));
       this.redrawPage(pageId); return;
@@ -570,8 +582,12 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     else if (element.type === "stroke") {
       // Keep the pen-down path entirely incremental. Re-running the model over
       // the full stroke on every pointer event caused the Lenovo pen lag.
+      const firstNewPoint = this.currentRawPoints.length;
       for (const sample of events) this.currentRawPoints.push(this.toPoint(sample, page, canvas));
       element.points = this.currentRawPoints;
+      const context = canvas.getContext("2d");
+      if (context) drawLiveInk(context, element, firstNewPoint);
+      return;
     }
     else if (element.type === "shape" && isShapeTool(this.tool) && this.shapeDragStart) element.points = draggedShapePoints(this.tool, this.shapeDragStart, this.toPoint(events[events.length - 1], page, canvas));
     this.redrawPage(pageId);
@@ -586,6 +602,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
       return;
     }
     if (!canvas.hasPointerCapture(event.pointerId)) return;
+    if (event.type !== "pointercancel") this.pointerMove(event, pageId);
     event.preventDefault(); canvas.releasePointerCapture(event.pointerId);
     if (this.tool === "laser") { this.transientLaser = null; this.pointerPageId = null; this.redrawPage(pageId); return; }
     const element = page.elements.find((candidate) => candidate.id === this.currentElementId);
@@ -678,6 +695,11 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     const page = this.activePage(); if (!page) return;
     const shape = await constructionDialog(page, kind, this.canvases.get(page.id), this.plugin.settings.penColor, this.plugin.settings.penSize);
     if (shape && this.page(page.id) === page) { this.remember(); page.elements.push(shape); this.markChanged(); this.redrawPage(page.id); }
+  }
+  private async insertText(): Promise<void> {
+    const page = this.activePage(); if (!page) return;
+    const text = await textDialog(page, this.plugin.settings.penColor);
+    if (text && this.page(page.id) === page) { this.remember(); page.elements.push(text); this.markChanged(); this.redrawPage(page.id); }
   }
   private registerBaseline(page: HandwritingPage, baseline: number): void {
     if (!Number.isFinite(baseline) || baseline <= 0 || baseline >= page.height) return;
@@ -788,15 +810,25 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     this.wordTimers.clear(); this.normalizationEpoch += 1;
     this.rebuildPages(); this.markChanged(); this.setStatus("Notiz geleert – Rückgängig ist möglich");
   }
-  private remember(): void { this.history.push(cloneDocument(this.document)); if (this.history.length > 60) this.history.shift(); }
+  private remember(): void { this.future = []; this.history.push(cloneDocument(this.document)); if (this.history.length > 60) this.history.shift(); }
   private undo(): void {
-    const previous = this.history.pop(); if (!previous) return; this.document = previous;
+    if (this.pointerPageId) return;
+    const previous = this.history.pop(); if (!previous) return; this.future.push(cloneDocument(this.document)); this.document = previous;
     if (!this.document.pages.some((page) => page.id === this.activePageId)) this.activePageId = this.document.pages[0].id;
     this.pendingStrokes.clear(); for (const timer of this.wordTimers.values()) window.clearTimeout(timer); this.wordTimers.clear(); this.normalizationEpoch += 1; this.rebuildPages(); this.markChanged();
+  }
+  private redo(): void {
+    if (this.pointerPageId) return;
+    const next = this.future.pop(); if (!next) return;
+    this.history.push(cloneDocument(this.document)); this.document = next;
+    this.clearPendingNormalization();
+    if (!this.page(this.activePageId)) this.activePageId = this.document.pages[0].id;
+    this.rebuildPages(); this.markChanged();
   }
   private markChanged(): void { this.dirty = true; this.changeRevision += 1; this.scheduleSave(); }
   private scheduleSave(): void { if (this.saveTimer !== null) window.clearTimeout(this.saveTimer); this.saveTimer = window.setTimeout(() => { this.saveTimer = null; void this.saveNow(); }, 500); }
   private async saveNow(): Promise<void> {
+    if (this.pointerPageId) { this.scheduleSave(); return; }
     if (!this.dirty) return; const revision = this.changeRevision;
     try { await this.plugin.saveDocument(this.file, this.document); if (revision === this.changeRevision) this.dirty = false; }
     catch (error) { new Notice(`Smooth Handwriting konnte nicht speichern: ${error instanceof Error ? error.message : String(error)}`); }
