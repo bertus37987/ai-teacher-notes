@@ -1,6 +1,16 @@
 # Abnahme im echten Obsidian: konkreter Zugang
 
-## Live geprüft
+## Aktualisierung nach Nutzerfreigabe
+
+Die CLI ist jetzt aktiviert. Der erste erfolgreiche Statusaufruf zeigte noch **0.7.1 geladen**, obwohl 0.16.2 bereits auf Datenträger lag. Nach gezieltem `plugin:reload` wurde 0.16.2 geladen; der gebündelte Font war im echten Host verfügbar.
+
+Der echte Worker-/WASM-Test scheiterte zunächst an `Failed to resolve module specifier 'worker_threads'`: Electron stellt im Worker einen Node-Prozess-Shim bereit, wodurch ONNX Runtime den falschen Umgebungspfad wählte. Die Korrektur entfernt diesen Shim ausschließlich im dedizierten ML-Worker. Der erneute native Test mit weißem Eingabetensor lief ohne Backendfehler durch. Das Modell gab auf diesem künstlichen Leerbild `-` aus; dieser Test beweist nur funktionierende Inferenz, keine Texterkennungsqualität. Der Obsidian-Hauptprozess bleibt unberührt.
+
+0.16.3 enthält diese Host-Korrektur und Regressionstests für Electron- und Browser-Worker. Die frühere CLI-Blockade unten ist damit historisch, nicht mehr aktuell.
+
+Nach Installation und Plugin-Neuladen wurde auch der **Produktionsclient** geprüft: `createRecognizer()` (derselbe Einstieg wie im Handschrift-Editor) rasterisierte sieben synthetische „Hallo“-Striche im echten Obsidian und führte die lokale Erkennung aus. Ergebnis: `{"status":"finished","version":"0.16.3","expected":"Hallo","text":"Hallo"}`. Der Client wurde danach beendet; keine Notizdatei wurde angelegt oder verändert. Dies belegt den nativen Weg von Strichen über Rasterisierung, Worker und WASM bis zum Transkript, nicht die Genauigkeit auf schwierigen echten Nutzerproben.
+
+## Früherer Befund vor Nutzerfreigabe
 
 - Obsidian ist als Flatpak `md.obsidian.Obsidian`, Version 1.13.7, installiert und läuft.
 - Auf Datenträger liegt Smooth Handwriting 0.16.2. Daraus folgt nicht, dass diese Version im laufenden Obsidian geladen ist.

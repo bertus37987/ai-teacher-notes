@@ -665,7 +665,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
   private async recognizeHandwriting(): Promise<void> {
     const page = this.activePage(); if (!page) return;
     this.clearPendingNormalization(); const revision = this.changeRevision;
-    this.recognizer = new LocalHandwritingRecognizer(name => this.plugin.assetUrl(name));
+    this.recognizer = this.plugin.createRecognizer();
     try {
       const result = await reviewHandwriting(page, this.recognizer);
       if (!result) return;
@@ -830,6 +830,7 @@ export default class SmoothHandwritingPlugin extends Plugin {
   }
   persistSettings(): Promise<void> { return this.saveData(this.settings); }
   assetUrl(name: string): string { return this.app.vault.adapter.getResourcePath(`${this.manifest.dir}/assets/${name}`); }
+  createRecognizer(): LocalHandwritingRecognizer { return new LocalHandwritingRecognizer(name => this.assetUrl(name)); }
   private async insertBlock(editor: Editor): Promise<void> {
     const folder = normalizePath(this.settings.folder.trim() || DEFAULT_SETTINGS.folder); if (!this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
     const stamp = new Date().toISOString().replace(/[:.]/g, "-"); const path = normalizePath(`${folder}/Handschrift-${stamp}.handwriting.json`);

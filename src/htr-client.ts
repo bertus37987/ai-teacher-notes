@@ -2,6 +2,11 @@ import { InkLine } from "./htr-core";
 
 export type AssetUrl = (name: string) => string;
 
+/** Isolate Electron's process shim only inside our dedicated inference worker. */
+export function browserWorkerSource(source: string): string {
+  return 'Object.defineProperty(globalThis, "process", { value: undefined, configurable: true });\n' + source;
+}
+
 export function rasterizeLine(line: InkLine): { pixels: Float32Array; width: number; preview: string } {
   const padding = Math.max(3, ...line.strokes.map(s => s.size));
   const height = Math.max(1, line.maxY - line.minY) + padding * 2;
@@ -35,7 +40,9 @@ export class LocalHandwritingRecognizer {
     // Blob wrapper also supports Obsidian's app:// vault asset URLs.
     const response = await fetch(this.asset("htr-worker.js"));
     if (!response.ok) throw new Error("HTR-Worker fehlt. Bitte das vollständige Plugin-Paket installieren.");
-    const url = URL.createObjectURL(new Blob([await response.text()], { type: "text/javascript" }));
+    // Electron exposes a Node process shim in workers. Emscripten must use its
+    // browser/WASM backend here, including in dynamically imported runtime modules.
+    const url = URL.createObjectURL(new Blob([browserWorkerSource(await response.text())], { type: "text/javascript" }));
     try { this.worker = new Worker(url); } finally { URL.revokeObjectURL(url); }
     this.worker.onmessage = event => {
       const entry = this.pending.get(event.data.id); if (!entry) return;

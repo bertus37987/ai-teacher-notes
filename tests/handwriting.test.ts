@@ -4,6 +4,8 @@ import { applyReconstructions, decodeCtc, planReconstructions, reconstructLine, 
 import { constructGeometry } from "../src/geometry-tools";
 import { normalizeHandwritingWord } from "../src/handwriting-normalizer";
 import { drawText } from "../src/rendering";
+import { browserWorkerSource } from "../src/htr-client";
+import { runInNewContext } from "node:vm";
 
 const make = (id: string, x: number, y: number, height = 35): StrokeElement => ({ type: "stroke", id, color: "#111", size: 3, points: [{ x, y, pressure: .5 }, { x: x + 10, y: y + height, pressure: .7 }] });
 const document = createDocument("grid"); const page = document.pages[0];
@@ -78,3 +80,12 @@ assert.throws(() => planReconstructions(crowded, [proposal, proposal]), /mehrfac
 crowded.elements[0].locked = true;
 assert.throws(() => applyReconstructions(crowded, [proposal]), /geändert/);
 console.log("Handwriting placement and atomicity tests passed");
+
+const electronWorker = { process: {versions:{node:"22"}}, result:"" };
+runInNewContext(browserWorkerSource('globalThis.result = typeof globalThis.process;'), electronWorker);
+assert.equal(electronWorker.result, "undefined", "Electron worker must select the browser/WASM runtime");
+const browserWorker = {result:""};
+runInNewContext(browserWorkerSource('globalThis.result = typeof globalThis.process;'), browserWorker);
+assert.equal(browserWorker.result, "undefined", "regular browser workers stay supported");
+assert.ok(process.versions.node, "host Node process must not be modified");
+console.log("Electron worker isolation tests passed");
