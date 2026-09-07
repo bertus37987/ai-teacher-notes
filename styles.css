@@ -119,7 +119,7 @@ body.hp-editor-open { overflow: hidden; }
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
-  scroll-behavior: smooth;
+  scroll-behavior: auto;
 }
 
 .hp-page {
@@ -158,7 +158,8 @@ body.hp-editor-open { overflow: hidden; }
 .hp-paper-blank { background-image: none; }
 .hp-page canvas { display: block; width: 100%; height: auto; touch-action: none; }
 .hp-inline:not(.is-editing) .hp-page canvas { pointer-events: none; }
-.hp-inline.is-editing .hp-page canvas { cursor: none; }
+.hp-inline.is-editing .hp-page canvas { cursor: crosshair; }
+.hp-inline.is-editing[data-tool="laser"] .hp-page canvas { cursor: none; }
 
 .hp-pen-reticle {
   --hp-reticle-color: #202124;
@@ -166,6 +167,8 @@ body.hp-editor-open { overflow: hidden; }
   display: none;
   position: fixed;
   z-index: 11000;
+  left: 0;
+  top: 0;
   width: var(--hp-reticle-size);
   height: var(--hp-reticle-size);
   border: 1px solid rgb(255 255 255 / 80%);

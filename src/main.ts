@@ -439,6 +439,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
 
   private activateTool(tool: Tool): void {
     this.tool = tool;
+    if (tool !== "laser") this.reticle?.removeClass("is-visible");
     this.wrapper.dataset.tool = tool;
     for (const [candidate, button] of this.toolButtons) { button.toggleClass("is-active", candidate === tool); button.setAttribute("aria-pressed", String(candidate === tool)); }
     this.updateReticleStyle();
@@ -454,9 +455,9 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
   }
 
   private updateReticle(event: PointerEvent): void {
-    if (!this.editing || event.pointerType === "touch") return;
-    this.reticle.style.left = `${event.clientX}px`;
-    this.reticle.style.top = `${event.clientY}px`;
+    // Normal tools use the browser cursor, which does not wait for JS/painting.
+    if (!this.editing || event.pointerType === "touch" || this.tool !== "laser") { this.reticle.removeClass("is-visible"); return; }
+    this.reticle.style.transform = `translate3d(${event.clientX}px, ${event.clientY}px, 0) translate(-50%, -50%)`;
     this.reticle.addClass("is-visible");
   }
 
