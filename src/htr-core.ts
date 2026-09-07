@@ -4,6 +4,14 @@ import { TEXT_LINE_HEIGHT } from "./rendering";
 export const HTR_MODEL = "naeyn/de-htr-web-v2@6241c1ff";
 export interface InkLine { strokes: StrokeElement[]; minX: number; minY: number; maxX: number; maxY: number }
 
+/** Explicit user regrouping, not an automatic guess about different writing rows. */
+export function joinInkLines(lines: InkLine[]): InkLine {
+  if (lines.length < 2) throw new Error("Mindestens zwei Gruppen auswählen.");
+  const strokes = lines.flatMap(line => line.strokes);
+  if (new Set(strokes.map(s => s.id)).size !== strokes.length) throw new Error("Ein Strich gehört zu mehreren Gruppen.");
+  return { strokes: structuredClone(strokes), minX: Math.min(...lines.map(l => l.minX)), minY: Math.min(...lines.map(l => l.minY)), maxX: Math.max(...lines.map(l => l.maxX)), maxY: Math.max(...lines.map(l => l.maxY)) };
+}
+
 /** Spatial grouping, independent of capture order (including late dots and crossbars). */
 export function segmentInkLines(strokes: StrokeElement[]): InkLine[] {
   const candidates = strokes.filter(s => !s.locked && s.points.length > 0 && s.points.every(p => Number.isFinite(p.x) && Number.isFinite(p.y)))

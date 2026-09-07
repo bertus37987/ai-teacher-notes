@@ -1,11 +1,11 @@
 import { HandwritingPage, StrokeElement, TextElement } from "./document";
 import { LocalHandwritingRecognizer, rasterizeLine } from "./htr-client";
-import { planReconstructions, reconstructLine, segmentInkLines } from "./htr-core";
+import { InkLine, joinInkLines, planReconstructions, reconstructLine, segmentInkLines } from "./htr-core";
 import { drawText, textFontString } from "./rendering";
 
 /** Preview is an explicit proposal: cancelling or any error leaves all ink untouched. */
-export async function reviewHandwriting(page: HandwritingPage, recognizer: LocalHandwritingRecognizer): Promise<TextElement[] | null> {
-  const lines = segmentInkLines(structuredClone(page.elements.filter((e): e is StrokeElement => e.type === "stroke")));
+export async function reviewHandwriting(page: HandwritingPage, recognizer: LocalHandwritingRecognizer, groupedLines?: InkLine[]): Promise<TextElement[] | null> {
+  const lines = groupedLines ?? segmentInkLines(structuredClone(page.elements.filter((e): e is StrokeElement => e.type === "stroke")));
   if (!lines.length) throw new Error("Keine freie Handschrift auf dieser Seite. Zeichne zuerst mit dem Stift.");
   const dialog = document.createElement("dialog"); dialog.className = "hp-review";
   const title = document.createElement("h2"); title.textContent = "Handschrift lesbar machen";
@@ -15,7 +15,9 @@ export async function reviewHandwriting(page: HandwritingPage, recognizer: Local
   const actions = document.createElement("div"); actions.className = "hp-dialog-actions";
   const cancel = document.createElement("button"); cancel.textContent = "Abbrechen";
   const apply = document.createElement("button"); apply.textContent = "Geprüfte Zeilen übernehmen"; apply.disabled = true;
-  actions.append(cancel, apply); dialog.append(title, note, status, rows, actions); document.body.append(dialog);
+  const join = document.createElement("button"); join.textContent = "Auswahl gemeinsam neu erkennen"; join.disabled = true;
+  const groupingHint = document.createElement("p"); groupingHint.textContent = "Ein Wort wurde aufgeteilt? Zugehörige Gruppen ankreuzen und gemeinsam neu erkennen. Dabei startet die gesamte Vorschau neu; bereits eingegebene Textkorrekturen werden verworfen. Die Originalschrift bleibt unverändert.";
+  actions.append(cancel, join, apply); dialog.append(title, note, groupingHint, status, rows, actions); document.body.append(dialog);
   const entries = lines.map((line, i) => {
     const row = document.createElement("div"); row.className = "hp-review-row";
     const label = document.createElement("label"); label.textContent = `Zeile ${i + 1} übernehmen`;
@@ -57,6 +59,17 @@ export async function reviewHandwriting(page: HandwritingPage, recognizer: Local
         finish(planReconstructions(page, selected.map(e => e.proposal())));
       } catch (error) { status.textContent = error instanceof Error ? error.message : String(error); }
     };
+    join.onclick = () => {
+      const selected = entries.filter(e => e.check.checked);
+      try {
+        const merged = joinInkLines(selected.map(e => e.line));
+        const remaining = entries.filter(e => !e.check.checked).map(e => e.line);
+        const regrouped = [...remaining, merged].sort((a, b) => a.minY - b.minY || a.minX - b.minX);
+        closed = true; dialog.close(); dialog.remove();
+        // Reuse the loaded local model. The next review owns disposal and confirmation.
+        void reviewHandwriting(page, recognizer, regrouped).then(resolve, () => { recognizer.dispose(); resolve(null); });
+      } catch (error) { status.textContent = error instanceof Error ? error.message : String(error); }
+    };
     dialog.showModal();
     void (async () => {
       for (let i = 0; i < entries.length && !closed; i++) {
@@ -65,7 +78,7 @@ export async function reviewHandwriting(page: HandwritingPage, recognizer: Local
         catch (error) { if (closed) return; entry.hint.textContent = `Keine sichere Erkennung: ${error instanceof Error ? error.message : String(error)} Du kannst die Zeile selbst eingeben.`; }
         entry.input.placeholder = "Text prüfen oder selbst eingeben";
       }
-      if (!closed) { status.textContent = "Vorschau fertig. Noch wurde kein Strich ersetzt."; apply.disabled = false; }
+      if (!closed) { status.textContent = "Vorschau fertig. Noch wurde kein Strich ersetzt."; apply.disabled = false; join.disabled = false; }
     })();
   });
 }

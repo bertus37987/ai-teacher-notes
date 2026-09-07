@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createDocument, parseDocument, StrokeElement } from "../src/document";
-import { applyReconstructions, decodeCtc, planReconstructions, reconstructLine, restoreReconstructions, segmentInkLines } from "../src/htr-core";
+import { applyReconstructions, decodeCtc, joinInkLines, planReconstructions, reconstructLine, restoreReconstructions, segmentInkLines } from "../src/htr-core";
 import { constructGeometry, aimConstruction } from "../src/geometry-tools";
 import { normalizeHandwritingWord } from "../src/handwriting-normalizer";
 import { drawText } from "../src/rendering";
@@ -13,6 +13,15 @@ page.elements = [make("b", 60, 100), make("a", 20, 100), make("c", 20, 200), mak
 const original = structuredClone(page.elements);
 const lines = segmentInkLines(page.elements as StrokeElement[]);
 assert.equal(lines.length, 2); assert.equal(lines[0].strokes.length, 3, "detached dot joins first line");
+const joined = joinInkLines(lines);
+assert.equal(joined.strokes.length, 4);
+assert.equal(joined.minY, Math.min(...lines.map(l => l.minY)));
+assert.equal(joined.maxY, Math.max(...lines.map(l => l.maxY)));
+assert.deepEqual(page.elements, original, "regrouping does not change the page");
+assert.throws(() => joinInkLines([lines[0]]), /zwei/);
+assert.throws(() => joinInkLines([lines[0], lines[0]]), /mehreren/);
+joined.strokes[0].points[0].x = -999;
+assert.deepEqual(page.elements, original, "regrouping does not alias original points");
 const reconstructed = lines.map((line, i) => reconstructLine(page, line, ["Hallo", "Welt"][i]));
 applyReconstructions(page, reconstructed); assert.equal(page.elements.length, 2);
 const reload = parseDocument(JSON.parse(JSON.stringify(document)))!.document.pages[0];
