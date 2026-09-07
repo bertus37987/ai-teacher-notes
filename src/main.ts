@@ -780,6 +780,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     busy.textContent = "Dokument wird lokal vorbereitet …"; busy.setAttribute("aria-label", "PDF-Import");
     busy.oncancel = event => event.preventDefault(); document.body.append(busy); busy.showModal();
     this.importing = true;
+    const emptyStartPage = this.document.pages.length === 1 && this.document.pages[0].elements.length === 0 && files.every(file => file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) ? this.document.pages[0].id : null;
     this.remember(); let imageTargetUsed = false; let importedPages = 0;
     try {
       this.setStatus("Importiere Datei …");
@@ -812,6 +813,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
           imageTargetUsed = true; importedPages += 1;
         } else throw new Error(`Nicht unterstütztes Format: ${file.name}`);
       }
+      if (emptyStartPage && importedPages > 0) this.document.pages = this.document.pages.filter(page => page.id !== emptyStartPage);
       this.rebuildPages(); this.markChanged(); this.setStatus(`${importedPages} Seite${importedPages === 1 ? "" : "n"} importiert`);
       requestAnimationFrame(() => this.pagesEl.querySelector(`[data-page-id="${this.activePageId}"]`)?.scrollIntoView({ block: "start" }));
       window.setTimeout(() => this.setStatus(""), 1800);

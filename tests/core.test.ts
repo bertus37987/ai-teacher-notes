@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { HighlightElement, ImageElement, ShapeElement, TextElement, createDocument, elementBounds, mergeClosedLineShapes, parseDocument } from "../src/document";
 import { buildImagePdf, buildMultiPageImagePdf, dataUrlBytes } from "../src/export";
+
+const landscapePdf = new TextDecoder().decode(buildImagePdf(new Uint8Array([255, 216, 255, 217]), 1600, 800));
+assert.ok(landscapePdf.includes("/MediaBox [0 0 595.28 297.64]"), "landscape ratio must survive export");
+assert.ok(landscapePdf.includes("595.28 0 0 297.64 0 0 cm"), "image uses the same undistorted page rectangle");
+assert.throws(() => buildImagePdf(new Uint8Array(), 0, 800), /Seitengröße/);
 import { normalizeHandwritingWord } from "../src/handwriting-normalizer";
 import { draggedShapePoints, optimizeShape, shapeContainsPoint } from "../src/shapes";
 import { snapHighlightToWords, wordBoxes } from "../src/smart-highlight";

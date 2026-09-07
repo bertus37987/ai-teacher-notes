@@ -10,7 +10,7 @@ const encode = (value: string): Uint8Array => new TextEncoder().encode(value);
 
 export interface PdfImagePage { jpeg: Uint8Array; pixelWidth: number; pixelHeight: number }
 
-/** Build a standards-compatible A4 PDF containing one JPEG per page. */
+/** Build a PDF containing one JPEG per page without changing its aspect ratio. */
 export function buildMultiPageImagePdf(pages: PdfImagePage[]): Uint8Array {
   if (pages.length === 0) throw new Error("PDF benötigt mindestens eine Seite");
   const kids = pages.map((_, index) => `${3 + index * 3} 0 R`).join(" ");
@@ -19,10 +19,13 @@ export function buildMultiPageImagePdf(pages: PdfImagePage[]): Uint8Array {
     encode(`<< /Type /Pages /Kids [${kids}] /Count ${pages.length} >>`)
   ];
   for (const [index, page] of pages.entries()) {
+    if (![page.pixelWidth, page.pixelHeight].every(n => Number.isFinite(n) && n > 0)) throw new Error("Ungültige PDF-Seitengröße");
+    const width = 595.28;
+    const height = Number((width * page.pixelHeight / page.pixelWidth).toFixed(4));
     const pageId = 3 + index * 3; const imageId = pageId + 1; const contentId = pageId + 2;
-    objects.push(encode(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /XObject << /Im${index} ${imageId} 0 R >> >> /Contents ${contentId} 0 R >>`));
+    objects.push(encode(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${width} ${height}] /Resources << /XObject << /Im${index} ${imageId} 0 R >> >> /Contents ${contentId} 0 R >>`));
     objects.push(concatBytes([encode(`<< /Type /XObject /Subtype /Image /Width ${page.pixelWidth} /Height ${page.pixelHeight} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${page.jpeg.length} >>\nstream\n`), page.jpeg, encode("\nendstream")]));
-    const stream = encode(`q\n595.28 0 0 841.89 0 0 cm\n/Im${index} Do\nQ\n`);
+    const stream = encode(`q\n${width} 0 0 ${height} 0 0 cm\n/Im${index} Do\nQ\n`);
     objects.push(concatBytes([encode(`<< /Length ${stream.length} >>\nstream\n`), stream, encode("endstream")]));
   }
   const parts: Uint8Array[] = [encode("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n")];
