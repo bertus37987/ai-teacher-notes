@@ -48,12 +48,13 @@ export function decodeCtc(logits: ArrayLike<number>, dims: readonly number[], al
   return text.trim();
 }
 
-export function reconstructLine(page: HandwritingPage, line: InkLine, text: string, sizeScale = 1, measure?: (text: string, fontSize: number) => number): TextElement {
+export function reconstructLine(page: HandwritingPage, line: InkLine, text: string, sizeScale = 1, measure?: (text: string, fontSize: number) => number, targetFontSize?: number): TextElement {
   if (!text.trim() || text.length > 500) throw new Error("Bitte 1–500 Zeichen pro Zeile bestätigen");
   if (!line.strokes.every(s => page.elements.some(e => e.id === s.id && JSON.stringify(e) === JSON.stringify(s)))) throw new Error("Die Handschrift hat sich geändert. Bitte neu erkennen.");
   const originals = structuredClone(line.strokes);
   if (!Number.isFinite(sizeScale) || sizeScale < 0.75 || sizeScale > 1.75) throw new Error("Ungültige Schriftgröße");
-  const fontSize = Math.max(22, (line.maxY - line.minY) * 1.35) * sizeScale;
+  if (targetFontSize !== undefined && (!Number.isFinite(targetFontSize) || targetFontSize < 16 || targetFontSize > 96)) throw new Error("Schriftgröße muss zwischen 16 und 96 px liegen");
+  const fontSize = targetFontSize ?? Math.max(22, (line.maxY - line.minY) * 1.35) * sizeScale;
   const width = page.width - line.minX - 16;
   const fits = measure ?? ((value: string, size: number) => Array.from(value).length * size * 0.55);
   const lines: string[] = [];

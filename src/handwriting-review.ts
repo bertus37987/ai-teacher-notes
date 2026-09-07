@@ -27,20 +27,20 @@ export async function reviewHandwriting(page: HandwritingPage, recognizer: Local
     const input = document.createElement("input"); input.type = "text"; input.maxLength = 500; input.setAttribute("aria-label", `Erkannter Text Zeile ${i + 1}`);
     input.placeholder = "Erkennung läuft …";
     const hint = document.createElement("small");
-    const sizeLabel = document.createElement("label"); sizeLabel.textContent = "Schriftgröße (100 % = an deiner Eingabe orientiert)";
-    const size = document.createElement("input"); size.type = "range"; size.min = "75"; size.max = "175"; size.step = "5"; size.value = "100"; size.setAttribute("aria-label", `Schriftgröße Zeile ${i + 1}`); sizeLabel.append(size);
+    const sizeLabel = document.createElement("label"); sizeLabel.textContent = "Saubere Heftschrift · Größe in Seitenpixeln (Standard 32)";
+    const size = document.createElement("input"); size.type = "range"; size.min = "16"; size.max = "96"; size.step = "2"; size.value = "32"; size.setAttribute("aria-label", `Schriftgröße Zeile ${i + 1}`); sizeLabel.append(size);
     const result = document.createElement("canvas"); result.style.width = "100%"; result.style.height = "auto"; result.setAttribute("aria-label", `Rekonstruktion Zeile ${i + 1}`);
     const ctx = result.getContext("2d")!;
-    const proposal = (): TextElement => reconstructLine(page, line, input.value, Number(size.value) / 100, (value, fontSize) => {
+    const proposal = (): TextElement => reconstructLine(page, line, input.value, 1, (value, fontSize) => {
       ctx.font = textFontString({fontSize}, '"Teacher Caveat", cursive'); return ctx.measureText(value).width;
-    });
+    }, Number(size.value));
     const refresh = (): void => {
       if (!input.value.trim()) return;
       try {
         const text = proposal(); result.width = Math.ceil(text.width); result.height = Math.ceil(text.height! + text.fontSize * .3);
         ctx.fillStyle = "white"; ctx.fillRect(0, 0, result.width, result.height);
         drawText(ctx, { ...text, x: 0, baseline: text.fontSize }, '"Teacher Caveat", cursive');
-        hint.textContent = `${size.value} % · ${Math.round(text.fontSize)} px · natürlicher Buchstabenabstand, Umbruch statt Quetschen`;
+        hint.textContent = `${Math.round(text.fontSize)} px · gleichmäßige Heftschrift · natürlicher Buchstabenabstand, Umbruch statt Quetschen`;
       } catch (error) { ctx.clearRect(0, 0, result.width, result.height); hint.textContent = error instanceof Error ? error.message : String(error); }
     };
     input.oninput = refresh; size.oninput = refresh;
