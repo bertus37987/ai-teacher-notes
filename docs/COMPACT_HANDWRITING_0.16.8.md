@@ -7,3 +7,7 @@ Der Prüfdialog setzt erkannte und bestätigte Texte deshalb standardmäßig mit
 Die Kernfunktion behält ihren bisherigen originalgrößenorientierten Aufruf für bestehende Aufrufer; der Produktions-Prüfdialog übergibt ausdrücklich die kompakte Zielgröße. Neue Tests prüfen feste Zielgrößen, ungültige Werte und unveränderte Originalstriche. Typprüfung, sieben Testsuiten, Plugin-Paket und Lab-Build bestanden. Eine erneute visuelle Abnahme dieser Größe auf der echten Nutzerprobe steht noch aus.
 
 Installationsbackup: `plugin-backups/smooth-handwriting-0.16.7-7UqmLt` (nicht versioniert).
+
+## Visueller Darstellungstest
+
+Auf dem getrennten Browserblatt `?test=compact-0168` wurde ein großer synthetischer Einzelstrich gezeichnet. Nach Abschluss der Erkennung wurde der Vorschautext ausdrücklich manuell auf einen Testsatz gesetzt und mit dem Standard 32 px übernommen. Nach Speichern und Neuladen zeigte der Screenshot kompakte, gleichmäßige Caveat-Schrift mit natürlichen Abständen. Der Test belegt Darstellung und Persistenz, nicht die automatische Erkennung der Nutzerprobe. Das ursprüngliche Nutzerblatt wurde nicht verändert. Das Vergleichsblatt bleibt als gekennzeichnetes Testziel geöffnet.
