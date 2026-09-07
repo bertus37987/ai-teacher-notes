@@ -38,6 +38,7 @@
   },
   "dependencies": {
     "ink-stroke-modeler-ts": "https://github.com/WhiteboardCX/ink-stroke-modeler-ts/archive/240d80f2c78c2f70317b498d37564f90fcddfe0c.tar.gz",
-    "onnxruntime-web": "1.27.0"
+    "onnxruntime-web": "1.27.0",
+    "pdfjs-dist": "6.3.289"
   }
 }

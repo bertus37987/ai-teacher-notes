@@ -208,6 +208,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
   private deleteButton!: HTMLButtonElement;
   private toggleButton!: HTMLButtonElement;
   private toolbar!: HTMLDivElement;
+  private optionsPanel!: HTMLDivElement;
   private paperSelect!: HTMLSelectElement;
   private reticle!: HTMLDivElement;
   private tool: Tool = "pen";
@@ -223,6 +224,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
   private saveTimer: number | null = null;
   private wordTimers = new Map<string, number>();
   private dirty = false;
+  private importing = false;
   private editing = false;
   private expanded = false;
   private pendingStrokes = new Map<string, Set<string>>();
@@ -291,7 +293,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
   }
 
   private labeledControl(label: string): HTMLDivElement {
-    const section = this.toolbar.createEl("details", { cls: "hp-tool-section" });
+    const section = (label === "Werkzeug" ? this.toolbar : this.optionsPanel).createEl("details", { cls: "hp-tool-section" });
     section.open = ["Werkzeug", "Handschrift", "Konstruieren"].includes(label);
     section.createEl("summary", { text: label });
     const group = section.createDiv("hp-tool-group");
@@ -300,6 +302,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
 
   private buildToolbar(): void {
     this.toolbar = this.wrapper.createDiv("hp-toolbar");
+    this.optionsPanel = this.toolbar.createDiv("hp-options-panel"); this.optionsPanel.hidden = true;
     const toolGroup = this.labeledControl("Werkzeug");
     const tools: Array<[Tool, string, string]> = [["pen", "✎", "Stift"], ["highlight", "▰", "Intelligenter Markierer"], ["eraser", "⌫", "Radierer"], ["fill", "▣", "Geschlossene Form mit Stifttipp füllen"], ["laser", "●", "Präsentationsstift (nur beim Halten)"]];
     for (const [tool, icon, label] of tools) {
@@ -310,6 +313,11 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     toolGroup.createEl("button", { text: "T Text", attr: { "aria-label": "Text einfügen" } }).onclick = () => void this.insertText();
     toolGroup.createEl("button", { text: "↶ Zurück", attr: { "aria-label": "Rückgängig" } }).onclick = () => this.undo();
     toolGroup.createEl("button", { text: "↷ Wiederholen", attr: { "aria-label": "Wiederholen", title: "Strg/⌘ + Umschalt + Z" } }).onclick = () => this.redo();
+    const pdfInput = toolGroup.createEl("input", { type: "file", cls: "hp-file-input", attr: { accept: "application/pdf", "aria-label": "PDF hochladen" } });
+    toolGroup.createEl("button", { text: "PDF +", attr: { "aria-label": "PDF hochladen" } }).onclick = () => pdfInput.click();
+    pdfInput.onchange = () => { const files = Array.from(pdfInput.files ?? []); pdfInput.value = ""; if (files.length) void this.importFiles(files); };
+    const more = toolGroup.createEl("button", { text: "•••", attr: { "aria-label": "Weitere Werkzeuge", "aria-expanded": "false" } });
+    more.onclick = () => { this.optionsPanel.hidden = !this.optionsPanel.hidden; more.setAttribute("aria-expanded", String(!this.optionsPanel.hidden)); };
     const writing = this.labeledControl("Handschrift");
     writing.addClass("hp-text-controls");
     const writingLabel = writing.createEl("label", { text: "Buchstaben schützen" });
@@ -766,22 +774,34 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     page.elements.unshift(element);
   }
   private async importFiles(files: File[]): Promise<void> {
+    if (this.importing) return;
+    if (files.some(file => file.size > 20 * 1024 * 1024)) { new Notice("Bitte Dateien bis 20 MB verwenden."); return; }
+    const busy = document.createElement("dialog"); busy.className = "hp-review";
+    busy.textContent = "Dokument wird lokal vorbereitet …"; busy.setAttribute("aria-label", "PDF-Import");
+    busy.oncancel = event => event.preventDefault(); document.body.append(busy); busy.showModal();
+    this.importing = true;
     this.remember(); let imageTargetUsed = false; let importedPages = 0;
     try {
       this.setStatus("Importiere Datei …");
       for (const file of files) {
         if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
           const pdfjs = await loadPdfJs();
-          const pdf = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+          const loadingTask = pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) });
+          try {
+          const pdf = await loadingTask.promise;
+          if (pdf.numPages > 40) throw new Error("Bitte PDFs mit höchstens 40 Seiten verwenden.");
           for (let number = 1; number <= pdf.numPages; number += 1) {
-            const sourcePage = await pdf.getPage(number); const viewport = sourcePage.getViewport({ scale: 1.5 });
+            busy.textContent = `PDF wird vorbereitet: Seite ${number} von ${pdf.numPages} …`;
+            const sourcePage = await pdf.getPage(number); const originalViewport = sourcePage.getViewport({ scale: 1 });
+            const viewport = sourcePage.getViewport({ scale: Math.min(2, 1600 / Math.max(originalViewport.width, originalViewport.height)) });
             const canvas = document.createElement("canvas"); canvas.width = Math.ceil(viewport.width); canvas.height = Math.ceil(viewport.height);
             const context = canvas.getContext("2d"); if (!context) throw new Error("PDF-Canvas nicht verfügbar");
             await sourcePage.render({ canvasContext: context, viewport }).promise;
-            const page = createPage("blank"); this.placeImage(page, canvas.toDataURL("image/jpeg", 0.92), "image/jpeg", `${file.name} – Seite ${number}`, canvas.width, canvas.height);
+            const page = createPage("blank"); page.width = canvas.width; page.height = canvas.height; page.format = "custom";
+            this.placeImage(page, canvas.toDataURL("image/jpeg", 0.92), "image/jpeg", `${file.name} – Seite ${number}`, canvas.width, canvas.height);
             this.document.pages.push(page); this.activePageId = page.id; importedPages += 1;
           }
-          await pdf.destroy();
+          } finally { await loadingTask.destroy(); }
         } else if (file.type === "image/png" || file.type === "image/jpeg" || /\.(png|jpe?g)$/i.test(file.name)) {
           const dataUrl = await readDataUrl(file); const image = await loadHtmlImage(dataUrl);
           const useCurrentPage = !imageTargetUsed && importedPages === 0;
@@ -792,12 +812,14 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
           imageTargetUsed = true; importedPages += 1;
         } else throw new Error(`Nicht unterstütztes Format: ${file.name}`);
       }
-      this.rebuildPages(); this.markChanged(); this.setStatus(`${importedPages} Seite${importedPages === 1 ? "" : "n"} importiert`); window.setTimeout(() => this.setStatus(""), 1800);
+      this.rebuildPages(); this.markChanged(); this.setStatus(`${importedPages} Seite${importedPages === 1 ? "" : "n"} importiert`);
+      requestAnimationFrame(() => this.pagesEl.querySelector(`[data-page-id="${this.activePageId}"]`)?.scrollIntoView({ block: "start" }));
+      window.setTimeout(() => this.setStatus(""), 1800);
     } catch (error) {
       const previous = this.history.pop(); if (previous) this.document = previous;
       this.activePageId = this.document.pages[0].id; this.rebuildPages();
       new Notice(`Import fehlgeschlagen: ${error instanceof Error ? error.message : String(error)}`); this.setStatus("");
-    }
+    } finally { this.importing = false; busy.close(); busy.remove(); if (this.dirty) this.scheduleSave(); }
   }
   private clearAll(): void {
     if (!window.confirm("Wirklich alle Seiten dieser Handschriftnotiz leeren? Rückgängig stellt sie wieder her.")) return;
@@ -829,7 +851,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
   private markChanged(): void { this.dirty = true; this.changeRevision += 1; this.scheduleSave(); }
   private scheduleSave(): void { if (this.saveTimer !== null) window.clearTimeout(this.saveTimer); this.saveTimer = window.setTimeout(() => { this.saveTimer = null; void this.saveNow(); }, 500); }
   private async saveNow(): Promise<void> {
-    if (this.pointerPageId) { this.scheduleSave(); return; }
+    if (this.pointerPageId || this.importing) { this.scheduleSave(); return; }
     if (!this.dirty) return; const revision = this.changeRevision;
     try { await this.plugin.saveDocument(this.file, this.document); if (revision === this.changeRevision) this.dirty = false; }
     catch (error) { new Notice(`Smooth Handwriting konnte nicht speichern: ${error instanceof Error ? error.message : String(error)}`); }

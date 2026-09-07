@@ -1,8 +1,14 @@
 import { build } from "esbuild";
-import { mkdir, copyFile, cp } from "node:fs/promises";
+import { mkdir, copyFile, cp, readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 await mkdir("lab-dist", { recursive: true });
 await build({ entryPoints: ["lab/main.ts"], bundle: true, format: "esm", platform: "browser", target: "es2022", outfile: "lab-dist/lab.js", alias: { obsidian: "./lab/obsidian-mock.ts" } });
-await copyFile("lab/index.html", "lab-dist/index.html");
+const version = createHash("sha256").update(await readFile("lab-dist/lab.js")).update(await readFile("styles.css")).digest("hex").slice(0, 12);
+await writeFile("lab-dist/index.html", (await readFile("lab/index.html", "utf8")).replace('src="lab.js"', `src="lab.js?v=${version}"`).replace('href="styles.css"', `href="styles.css?v=${version}"`));
 await copyFile("styles.css", "lab-dist/styles.css");
 await cp("plugin-dist/smooth-handwriting/assets", "lab-dist/assets", { recursive: true });
+await mkdir("lab-dist/pdfjs", { recursive: true });
+await copyFile("node_modules/pdfjs-dist/build/pdf.worker.mjs", "lab-dist/pdfjs/pdf.worker.mjs");
+for (const folder of ["cmaps", "standard_fonts", "wasm"]) await cp(`node_modules/pdfjs-dist/${folder}`, `lab-dist/pdfjs/${folder}`, { recursive: true });
+await copyFile("node_modules/pdfjs-dist/LICENSE", "lab-dist/pdfjs/LICENSE");
 console.log("Plugin UI lab built. Serve lab-dist on localhost (not the repository root).");

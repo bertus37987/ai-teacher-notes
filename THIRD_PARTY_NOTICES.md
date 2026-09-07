@@ -1,5 +1,10 @@
 # Third-party notices
 
+## Browser PDF import
+
+- PDF.js / pdfjs-dist 6.3.289, Mozilla contributors, Apache-2.0: https://github.com/mozilla/pdf.js
+- The browser lab bundles the renderer and serves its matching worker, character maps, standard fonts and WASM locally. Its LICENSE is copied alongside these assets. Native Obsidian continues to use the host-provided PDF.js.
+
 ## Offline handwriting recognition (plugin preview 0.16.0)
 
 - ONNX Runtime Web 1.27.0, Microsoft, MIT: https://github.com/microsoft/onnxruntime

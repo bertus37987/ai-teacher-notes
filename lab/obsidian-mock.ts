@@ -11,7 +11,14 @@ export class Setting {}
 export class TFile { constructor(public path: string) {} }
 export class Notice { constructor(message: string) { const out = document.querySelector("#notices"); if (out) out.textContent = message; } }
 export function normalizePath(path: string): string { return path; }
-export function loadPdfJs(): never { throw new Error("PDF-Import benötigt den echten Obsidian-Host"); }
+export async function loadPdfJs() {
+  const pdfjs = await import("pdfjs-dist");
+  pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs/pdf.worker.mjs", location.href).href;
+  return { getDocument: (options: { data: Uint8Array }) => pdfjs.getDocument({ ...options,
+    cMapUrl: new URL("pdfjs/cmaps/", location.href).href, cMapPacked: true,
+    standardFontDataUrl: new URL("pdfjs/standard_fonts/", location.href).href,
+    wasmUrl: new URL("pdfjs/wasm/", location.href).href }) };
+}
 
 type Options = string | { text?: string; cls?: string; attr?: Record<string, string>; type?: string; value?: string };
 const create = function(this: HTMLElement, tag: string, options: Options = {}): HTMLElement {
