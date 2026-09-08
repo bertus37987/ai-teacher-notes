@@ -310,15 +310,15 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     const toolGroup = this.labeledControl("Werkzeug");
     const tools: Array<[Tool, string, string]> = [["pen", "✎", "Stift"], ["highlight", "▰", "Intelligenter Markierer"], ["eraser", "⌫", "Radierer"], ["fill", "▣", "Geschlossene Form mit Stifttipp füllen"], ["laser", "●", "Präsentationsstift (nur beim Halten)"]];
     for (const [tool, icon, label] of tools) {
-      const button = toolGroup.createEl("button", { text: `${icon} ${label === "Intelligenter Markierer" ? "Marker" : label === "Geschlossene Form mit Stifttipp füllen" ? "Füllen" : label === "Präsentationsstift (nur beim Halten)" ? "Laser" : label}`, attr: { "aria-label": label, title: label } });
+      const button = toolGroup.createEl("button", { text: icon, attr: { "aria-label": label, title: label } });
       button.addEventListener("click", () => this.activateTool(tool));
       this.toolButtons.set(tool, button);
     }
-    toolGroup.createEl("button", { text: "T Text", attr: { "aria-label": "Text einfügen" } }).onclick = () => void this.insertText();
-    toolGroup.createEl("button", { text: "↶ Zurück", attr: { "aria-label": "Rückgängig" } }).onclick = () => this.undo();
-    toolGroup.createEl("button", { text: "↷ Wiederholen", attr: { "aria-label": "Wiederholen", title: "Strg/⌘ + Umschalt + Z" } }).onclick = () => this.redo();
+    toolGroup.createEl("button", { text: "T", attr: { "aria-label": "Text einfügen", title: "Text einfügen" } }).onclick = () => void this.insertText();
+    toolGroup.createEl("button", { text: "↶", attr: { "aria-label": "Rückgängig", title: "Rückgängig" } }).onclick = () => this.undo();
+    toolGroup.createEl("button", { text: "↷", attr: { "aria-label": "Wiederholen", title: "Strg/⌘ + Umschalt + Z" } }).onclick = () => this.redo();
     const pdfInput = toolGroup.createEl("input", { type: "file", cls: "hp-file-input", attr: { accept: "application/pdf", "aria-label": "PDF hochladen" } });
-    toolGroup.createEl("button", { text: "PDF +", attr: { "aria-label": "PDF hochladen" } }).onclick = () => pdfInput.click();
+    toolGroup.createEl("button", { text: "⇧", attr: { "aria-label": "PDF hochladen", title: "PDF hochladen" } }).onclick = () => pdfInput.click();
     pdfInput.onchange = () => { const files = Array.from(pdfInput.files ?? []); pdfInput.value = ""; if (files.length) void this.importFiles(files); };
     const more = toolGroup.createEl("button", { text: "•••", attr: { "aria-label": "Weitere Werkzeuge", "aria-expanded": "false" } });
     more.onclick = () => { this.optionsPanel.hidden = !this.optionsPanel.hidden; more.setAttribute("aria-expanded", String(!this.optionsPanel.hidden)); };
