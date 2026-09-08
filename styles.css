@@ -320,6 +320,39 @@ body.hp-editor-open { overflow: hidden; }
 .hp-toolbar > .hp-tool-section > .hp-tool-group .hp-rgb-toggle { position: relative; background: conic-gradient(#e45454,#efcd59,#54b76e,#4596e7,#9863d3,#e45454); width: 26px; min-width: 26px; height: 26px; min-height: 26px; margin-inline: 5px; }
 .hp-rgb-toggle::after { content: ""; position: absolute; inset: 5px; background: var(--hp-selected-color, #202124); border: 2px solid white; border-radius: 50%; }
 .hp-options-panel small { color: #64748b; font-size: 11px; line-height: 1.5; }
+.hp-color-presets { grid-column: 1 / -1; display: flex; justify-content: space-between; gap: 12px; }
+.hp-color-presets button { width: 30px; height: 30px; padding: 0; border: 3px solid white; border-radius: 50%; box-shadow: 0 0 0 1px #dce3eb; }
+.hp-inline .hp-switch-row { display: flex; align-items: center; justify-content: space-between; grid-column: 1 / -1; gap: 16px; padding: 9px 0; font-size: 12px; }
+.hp-switch-row input { appearance: none; -webkit-appearance: none; width: 40px; min-width: 40px; height: 24px; border-radius: 20px; border: none; background: #dce1e7; position: relative; cursor: pointer; margin: 0; }
+.hp-switch-row input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: white; box-shadow: 0 1px 3px #0002; transition: transform .12s ease; }
+.hp-switch-row input:checked { background: #34c779; }
+.hp-switch-row input:checked::after { transform: translateX(16px); }
+.hp-options-panel { width: 290px; padding: 10px 16px; border-radius: 20px; }
+.hp-options-panel .hp-tool-section { border-bottom: 1px solid #edf0f4; padding: 4px 0; }
+.hp-options-panel .hp-tool-section summary { color: #435366; padding: 11px 2px; }
+.hp-inline .hp-options-panel .hp-tool-group button { border: 0; background: #f4f6f8; min-height: 36px; border-radius: 9px; }
+.hp-inline .hp-options-panel .hp-tool-group button.is-active { background: #e2f1ff; color: #176bad; }
+.hp-page-add { display: none; }
+.hp-inline.is-editing .hp-page-add { display: block; flex: 0 0 auto; margin: 16px auto 0; width: 44px; height: 44px; border-radius: 50%; border: 1px solid #dce5ed; background: white; color: #537083; font-size: 26px; box-shadow: 0 3px 12px #23364a0c; }
+.hp-object-editor { position: absolute; z-index: 8; border: 1px solid #5195da; box-sizing: border-box; background: white; box-shadow: 0 6px 22px #1b35531a; border-radius: 6px; }
+.hp-object-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 6px; background: #f5f8fc; border-radius: 6px 6px 0 0; }
+.hp-object-bar { position: absolute; bottom: calc(100% + 6px); left: -1px; right: -1px; background: #f5f8fc; border: 1px solid #dce5ef; border-radius: 10px; box-shadow: 0 5px 15px #23364a12; }
+.hp-object-editor.controls-below .hp-object-bar { top: calc(100% + 12px); bottom: auto; }
+.hp-object-actions button, .hp-object-actions select { min-height: 32px; border: 0; border-radius: 6px; background: white; color: #334155; font-size: 12px; }
+.hp-object-actions button[aria-pressed="true"] { background: #dceeff; color: #175c9a; }
+.hp-object-move, .hp-object-resize { touch-action: none; }
+.hp-object-move { cursor: move; }
+.hp-object-size { display: flex; gap: 12px; padding: 4px 8px; font-size: 11px; color: #64748b; }
+.hp-object-size input { width: 65px; margin-left: 5px; }
+.hp-object-content { overflow: auto; font-family: Arial, sans-serif; }
+.hp-object-content textarea { display: block; box-sizing: border-box; width: 100%; height: 100%; resize: none; border: 0; outline: none; padding: 0; margin: 0; color: inherit; font: inherit; text-align: inherit; line-height: 1.25; background: white; }
+.hp-object-resize { position: absolute; right: -10px; bottom: -10px; width: 32px; height: 32px; border-radius: 10px; border: 1px solid #b4d4f3; background: #edf6ff; color: #226aaa; cursor: nwse-resize; }
+.hp-edit-grid { width: 100%; height: 100%; border-collapse: collapse; table-layout: fixed; }
+.hp-edit-grid td { border: 1px solid #b9c5d3; padding: 0; }
+.hp-edit-grid tr:first-child { background: #edf3fa; }
+.hp-edit-grid input { box-sizing: border-box; width: 100%; min-width: 0; height: 100%; min-height: 38px; padding: 5px 8px; border: 0; background: transparent; font: inherit; color: inherit; text-align: inherit; }
+.hp-inline.is-editing[data-tool="select"] .hp-page canvas { cursor: default; }
+@media (prefers-reduced-motion: reduce) { .hp-switch-row input::after { transition: none; } }
 .hp-inline.is-editing .hp-pages { left: 0; padding-bottom: 150px; }
 @media (max-width: 600px) {
   .hp-inline.is-editing { --hp-panel-width: 180px; }
@@ -327,7 +360,7 @@ body.hp-editor-open { overflow: hidden; }
   .hp-inline.is-editing .hp-pages { left: 0; padding-inline: 8px; }
   .hp-inline.is-editing .hp-toolbar { max-width: calc(100vw - 16px); padding-inline: 4px; }
   .hp-toolbar > .hp-tool-section > .hp-tool-group { gap: 0; }
-  .hp-toolbar > .hp-tool-section > .hp-tool-group button { width: min(32px, calc((100vw - 78px) / 10)); min-width: min(32px, calc((100vw - 78px) / 10)); height: 32px; min-height: 32px; font-size: 15px; }
+  .hp-toolbar > .hp-tool-section > .hp-tool-group button { width: min(32px, calc((100vw - 78px) / 11)); min-width: min(32px, calc((100vw - 78px) / 11)); height: 32px; min-height: 32px; font-size: 15px; }
   .hp-toolbar > .hp-tool-section > .hp-tool-group button[aria-label="Text einfügen"] { margin-left: 3px; padding-left: 5px; }
   .hp-inline.is-editing.is-tools-hidden .hp-pages { left: 0; }
   .hp-inline-header { gap: 5px; padding-inline: 8px; }

@@ -3,7 +3,6 @@ import { HandwritingDocumentV3, HandwritingPage, HighlightElement, ImageElement,
 import { normalizeHandwritingWord } from "./handwriting-normalizer";
 import { ShapeDragTool, draggedShapePoints, optimizeShape, shapeContainsPoint } from "./shapes";
 import { InkPoint, InkStroke, cleanCapturedStroke, pressureWidth, strokeTouches, visibleInkColor } from "./strokes";
-import { snapHighlightToWords } from "./smart-highlight";
 import { PdfAnnotationManager } from "./pdf-annotation";
 import { buildImagePdf, buildMultiPageImagePdf, dataUrlBytes } from "./export";
 import { LocalHandwritingRecognizer } from "./htr-client";
@@ -12,13 +11,14 @@ import { applyReconstructions, restoreReconstructions } from "./htr-core";
 import { constructionDialog } from "./construction-dialog";
 import { drawText } from "./rendering";
 import { drawLiveInk } from "./live-ink";
-import { textDialog } from "./text-dialog";
+import { editNotebookText } from "./notebook-text";
+import { drawNotebookMarker, snapMarkerToText } from "./notebook-marker";
 import { abortable } from "./abortable";
-import { applyDockIcons, rangeControl, rgbPicker } from "./editor-controls";
+import { applyDockIcons, rangeControl, rgbPicker, switchControl } from "./editor-controls";
 import { EditorSnapshots } from "./editor-history";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
-type Tool = "pen" | "highlight" | "eraser" | "laser" | "fill" | ShapeDragTool;
+type Tool = "pen" | "highlight" | "eraser" | "laser" | "fill" | "select" | ShapeDragTool;
 
 export interface SmoothHandwritingSettings {
   settingsVersion: number;
@@ -27,6 +27,7 @@ export interface SmoothHandwritingSettings {
   shapeOptimization: boolean;
   shapeImprovement: number;
   laserSize: number;
+  markerSnap: boolean;
   wordDelay: number;
   markerColor: string;
   markerSize: number;
@@ -40,7 +41,7 @@ export interface SmoothHandwritingSettings {
 
 const DEFAULT_SETTINGS: SmoothHandwritingSettings = {
   settingsVersion: 3, folder: "Handwriting", defaultPaper: "grid", shapeOptimization: true, shapeImprovement: 0.7, laserSize: 6, wordDelay: 800,
-  markerColor: "#ffd84d", markerSize: 34, penColor: "#202124", penSize: 4,
+  markerSnap: true, markerColor: "#ffd84d", markerSize: 34, penColor: "#202124", penSize: 4,
   fillColor: "#7c5cff", fillOpacity: 0.24, pressureEnabled: true, pressureSensitivity: 0.72
 };
 
@@ -172,8 +173,7 @@ function drawPageElements(context: CanvasRenderingContext2D, page: HandwritingPa
   }
   for (const element of page.elements.filter((candidate) => candidate.type === "highlight")) {
     const highlight = element as HighlightElement;
-    context.save(); context.globalAlpha = highlight.opacity; context.strokeStyle = highlight.color; context.lineWidth = highlight.size; context.lineCap = "round";
-    context.beginPath(); context.moveTo(highlight.x1, highlight.y); context.lineTo(highlight.x2, highlight.y); context.stroke(); context.restore();
+    drawNotebookMarker(context, highlight);
   }
   for (const element of page.elements.filter((candidate) => candidate.type !== "highlight" && candidate.type !== "image")) {
     if (element.type === "stroke") drawInkStroke(context, element);
@@ -252,6 +252,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
   private portalAnchor: Comment | null = null;
   private touchScroll = new Map<number, number>();
   private shapeDragStart: InkPoint | null = null;
+  private objectEditing = false;
 
   constructor(container: HTMLElement, private readonly plugin: SmoothHandwritingPlugin, private readonly file: TFile, document: HandwritingDocumentV3, migrated: boolean) {
     super(container);
@@ -264,7 +265,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     this.mount();
     if (this.dirty) this.scheduleSave();
     const keyHandler = (event: KeyboardEvent): void => {
-      if (document.querySelector("dialog[open]") || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+      if (this.objectEditing || document.querySelector("dialog[open]") || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
       if (event.key === "Escape" && this.editing) this.setEditing(false);
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z" && this.editing) { event.preventDefault(); if (event.shiftKey) this.redo(); else this.undo(); }
     };
@@ -313,7 +314,8 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
 
   private labeledControl(label: string): HTMLDivElement {
     const section = (label === "Werkzeug" ? this.toolbar : this.optionsPanel).createEl("details", { cls: "hp-tool-section" });
-    section.open = ["Werkzeug", "Handschrift", "Konstruieren"].includes(label);
+    section.open = ["Werkzeug", "Handschrift"].includes(label);
+    if(label!=="Werkzeug") section.addEventListener("toggle",()=> { if(section.open) this.optionsPanel.querySelectorAll<HTMLDetailsElement>("details").forEach(other=> { if(other!==section) other.open=false; }); });
     section.createEl("summary", { text: label });
     const group = section.createDiv("hp-tool-group");
     return group;
@@ -324,6 +326,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     this.optionsPanel = this.toolbar.createDiv("hp-options-panel"); this.optionsPanel.hidden = true;
     const toolGroup = this.labeledControl("Werkzeug");
     const tools: Array<[Tool, string, string]> = [["pen", "✎", "Stift"], ["highlight", "▰", "Intelligenter Markierer"], ["eraser", "⌫", "Radierer"], ["fill", "▣", "Geschlossene Form mit Stifttipp füllen"], ["laser", "●", "Präsentationsstift (nur beim Halten)"]];
+    tools.unshift(["select", "↖", "Text und Tabellen auswählen"]);
     for (const [tool, icon, label] of tools) {
       const button = toolGroup.createEl("button", { text: icon, attr: { "aria-label": label, title: label } });
       button.addEventListener("click", () => this.activateTool(tool));
@@ -354,8 +357,10 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     more.onclick = () => { this.optionsPanel.hidden = !this.optionsPanel.hidden; more.setAttribute("aria-expanded", String(!this.optionsPanel.hidden)); colorPanel.hidden = true; colorButton.setAttribute("aria-expanded", "false"); };
     const writing = this.labeledControl("Handschrift");
     writing.addClass("hp-text-controls");
-    rangeControl(writing, "Buchstaben schützen", 1, 0, 1, 1, value => { this.handwritingMode = value === 1; this.clearPendingNormalization(); }, value => value ? "An" : "Aus");
-    rangeControl(writing, "Improve shapes", this.plugin.settings.shapeOptimization ? this.plugin.settings.shapeImprovement : 0, 0, 1, .05, value => { this.plugin.settings.shapeImprovement = value; this.plugin.settings.shapeOptimization = value > 0; }, value => value ? `${Math.round(value * 100)} %` : "Aus");
+    switchControl(writing, "Buchstaben schützen", true, value => { this.handwritingMode = value; this.clearPendingNormalization(); });
+    switchControl(writing, "Marker an Text ausrichten", this.plugin.settings.markerSnap, value => { this.plugin.settings.markerSnap = value; });
+    switchControl(writing, "Formen verbessern", this.plugin.settings.shapeOptimization, value => { this.plugin.settings.shapeOptimization = value; });
+    rangeControl(writing, "Formkorrektur-Stärke", this.plugin.settings.shapeImprovement || .7, .05, 1, .05, value => { this.plugin.settings.shapeImprovement = value; }, value => `${Math.round(value * 100)} %`);
     writing.createEl("small", { text: "Formkorrektur im Zeichenmodus: Buchstaben schützen ausschalten. Höhere Werte erkennen großzügiger." });
     rangeControl(writing, "Korrekturpause", this.plugin.settings.wordDelay, 400, 1500, 50, value => { this.plugin.settings.wordDelay = value; }, value => `${value} ms`);
     this.optionsPanel.addEventListener("change", () => void this.plugin.persistSettings());
@@ -365,6 +370,11 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
       const count = restoreReconstructions(page); this.markChanged(); this.redrawPage(page.id); this.setStatus(`${count} Originalstriche wiederhergestellt`);
     };
     const geometry = this.labeledControl("Konstruieren");
+    const insert = this.labeledControl("Einfügen");
+    insert.createEl("button", { text: "Textfeld" }).onclick = () => void this.insertText();
+    insert.createEl("button", { text: "Tabelle", attr: { "aria-label": "Tabelle einfügen" } }).onclick = () => void this.insertText(true);
+    const select=insert.createEl("button", { text: "Text / Tabelle bearbeiten", attr: { "aria-label": "Text oder Tabelle auswählen" } });
+    select.onclick=()=>{ this.optionsPanel.hidden=true; more.setAttribute("aria-expanded","false"); this.activateTool("select"); this.setStatus("Textfeld oder Tabelle antippen zum Bearbeiten"); };
     geometry.addClass("hp-text-controls");
     geometry.createEl("button", { text: "Geodreieck" }).onclick = () => void this.openConstruction("set-square");
     geometry.createEl("button", { text: "Zirkel" }).onclick = () => void this.openConstruction("compass");
@@ -394,7 +404,8 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     fill.addEventListener("input", () => { this.plugin.settings.fillColor = fill.value; void this.plugin.persistSettings(); });
     rangeControl(fillGroup, "Deckkraft der Füllung", this.plugin.settings.fillOpacity, 0, .8, .05, value => { this.plugin.settings.fillOpacity = value; }, value => value ? `${Math.round(value * 100)} %` : "Aus");
     const pressureGroup = this.labeledControl("Druck");
-    rangeControl(pressureGroup, "Drucksensitivität", this.plugin.settings.pressureEnabled ? this.plugin.settings.pressureSensitivity : 0, 0, 1, .05, value => { this.plugin.settings.pressureSensitivity = value; this.plugin.settings.pressureEnabled = value > 0; }, value => value ? `${Math.round(value * 100)} %` : "Aus");
+    switchControl(pressureGroup, "Stiftdruck verwenden", this.plugin.settings.pressureEnabled, value => { this.plugin.settings.pressureEnabled = value; });
+    rangeControl(pressureGroup, "Drucksensitivität", this.plugin.settings.pressureSensitivity, 0, 1, .05, value => { this.plugin.settings.pressureSensitivity = value; }, value => `${Math.round(value * 100)} %`);
     const pageGroup = this.labeledControl("Seite");
     this.paperSelect = pageGroup.createEl("select", { attr: { "aria-label": "Papierart" } });
     this.paperSelect.createEl("option", { value: "grid", text: "Kariert" });
@@ -516,6 +527,12 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
       canvas.addEventListener("pointermove", (event) => this.pointerMove(event, page.id));
       canvas.addEventListener("pointerup", (event) => this.pointerUp(event, page.id));
       canvas.addEventListener("pointercancel", (event) => this.pointerUp(event, page.id));
+      canvas.addEventListener("dblclick", event => {
+        if (!this.editing || this.objectEditing || this.tool !== "select") return;
+        const point = this.toPoint(event as PointerEvent, page, canvas);
+        const target = [...page.elements].reverse().find(e => { if(e.type !== "text") return false; const b=elementBounds(e); return point.x>=b.minX && point.x<=b.maxX && point.y>=b.minY && point.y<=b.maxY; });
+        if(target?.type === "text") void this.editTextElement(page, target);
+      });
       frame.addEventListener("click", () => this.setActivePage(page.id));
       const observer = new ResizeObserver(() => { this.updatePaperScale(frame, canvas, page); this.redrawPage(page.id); });
       observer.observe(canvas);
@@ -523,6 +540,8 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
       this.canvases.set(page.id, canvas);
     }
     this.updateHeader();
+    const add = this.pagesEl.createEl("button", { cls: "hp-page-add", text: "+", attr: { "aria-label": "Neue Seite am Ende hinzufügen", title: "Neue Seite" } });
+    add.onclick = () => this.addPage();
     requestAnimationFrame(() => this.redrawAll());
   }
 
@@ -552,9 +571,15 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
 
   private pointerDown(event: PointerEvent, pageId: string): void {
     this.updateReticle(event);
-    if (!this.editing) return;
+    if (!this.editing || this.objectEditing) return;
     const page = this.page(pageId); const canvas = this.canvases.get(pageId);
     if (!page || !canvas) return;
+    if (this.tool === "select") {
+      const point=this.toPoint(event,page,canvas);
+      const target=[...page.elements].reverse().find(e=> { if(e.type!=="text") return false; const b=elementBounds(e); return point.x>=b.minX && point.x<=b.maxX && point.y>=b.minY && point.y<=b.maxY; });
+      if(target?.type==="text" && event.button===0) { event.preventDefault(); this.setActivePage(pageId); void this.editTextElement(page,target); return; }
+      if(event.pointerType!=="touch") return;
+    }
     if (event.pointerType === "touch") {
       if (this.pointerPageId === null) { this.touchScroll.set(event.pointerId, event.clientY); canvas.setPointerCapture(event.pointerId); }
       return;
@@ -566,7 +591,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
       this.transientLaser = { id: "laser", color: "#ff1744", size: this.plugin.settings.laserSize, pressureSensitivity: 0, points: [point] };
       this.drawLaser(pageId); return;
     }
-    this.remember(this.tool === "pen" && this.handwritingMode);
+    this.remember((this.tool === "pen" && this.handwritingMode) || this.tool === "highlight");
     if (this.tool === "eraser") { this.eraseAt(page, point); return; }
     if (this.tool === "fill") {
       const target = [...page.elements].reverse().find((element): element is ShapeElement => element.type === "shape" && shapeContainsPoint(element, point));
@@ -578,7 +603,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
       canvas.releasePointerCapture(event.pointerId); this.pointerPageId = null; return;
     }
     if (this.tool === "highlight") {
-      const element: HighlightElement = { type: "highlight", id: crypto.randomUUID(), x1: point.x, x2: point.x, y: point.y, size: this.plugin.settings.markerSize, color: this.plugin.settings.markerColor, opacity: 0.28 };
+      const element: HighlightElement = { type: "highlight", id: crypto.randomUUID(), x1: point.x, x2: point.x, y: point.y, size: this.plugin.settings.markerSize, color: this.plugin.settings.markerColor, opacity: 0.28, points: [point] };
       page.elements.push(element); this.currentElementId = element.id; this.currentRawPoints = [point];
     } else if (isShapeTool(this.tool)) {
       const kind: ShapeKind = this.tool === "circle" ? "ellipse" : this.tool === "triangle" || this.tool === "diamond" ? "polygon" : this.tool;
@@ -588,9 +613,9 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
       const element: StrokeElement = { type: "stroke", id: crypto.randomUUID(), color: this.plugin.settings.penColor, size: this.plugin.settings.penSize, pressureSensitivity: this.plugin.settings.pressureEnabled ? this.plugin.settings.pressureSensitivity : 0, points: [point] };
       page.elements.push(element); this.currentElementId = element.id; this.currentRawPoints = [point];
     }
-    if (this.tool === "pen") {
+    if (this.tool === "pen" || this.tool === "highlight") {
       const overlay = this.overlays.get(pageId);
-      if (overlay) { const context = prepareCanvas(overlay, page); if (context) drawInkStroke(context, page.elements[page.elements.length - 1] as StrokeElement); }
+      if (overlay) { overlay.style.opacity = this.tool === "highlight" ? ".28" : "1"; const context = prepareCanvas(overlay, page); if (context) drawInkStroke(context, { id: "live", color: this.tool === "highlight" ? this.plugin.settings.markerColor : this.plugin.settings.penColor, size: this.tool === "highlight" ? this.plugin.settings.markerSize : this.plugin.settings.penSize, points: [point], pressureSensitivity: 0 }); }
     } else this.redrawPage(pageId);
   }
 
@@ -619,10 +644,13 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     const element = last?.id === this.currentElementId ? last : page.elements.find((candidate) => candidate.id === this.currentElementId);
     if (!element) return;
     if (element.type === "highlight") {
+      const firstNewPoint = this.currentRawPoints.length;
       for (const sample of events) this.currentRawPoints.push(this.toPoint(sample, page, canvas));
       element.x2 = this.currentRawPoints[this.currentRawPoints.length - 1].x;
-      const ys = this.currentRawPoints.map((point) => point.y).sort((left, right) => left - right);
-      element.y = ys[Math.floor(ys.length / 2)];
+      element.points = this.currentRawPoints;
+      const context = this.overlays.get(pageId)?.getContext("2d");
+      if(context) drawLiveInk(context, { id: element.id, color: element.color, size: element.size, pressureSensitivity: 0, points: element.points }, firstNewPoint);
+      return;
     }
     else if (element.type === "stroke") {
       // Keep the pen-down path entirely incremental. Re-running the model over
@@ -653,9 +681,11 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     const element = page.elements.find((candidate) => candidate.id === this.currentElementId);
     if (element?.type === "stroke") { element.rawPoints = structuredClone(this.currentRawPoints); element.points = cleanCapturedStroke(this.currentRawPoints, true); if (!this.handwritingMode && !this.convertAutomaticShape(page, element)) this.queueWordStroke(pageId, element.id); }
     else if (element?.type === "highlight") {
-      const snapped = snapHighlightToWords(page, element, this.currentRawPoints);
-      if (snapped) Object.assign(element, snapped);
-      else page.elements = page.elements.filter((candidate) => candidate.id !== element.id);
+      const context = canvas.getContext("2d");
+      if(context && this.plugin.settings.markerSnap) {
+        const snapped = snapMarkerToText(page, element, context);
+        const index = page.elements.indexOf(element); page.elements.splice(index, 1, ...snapped);
+      }
     }
     else if (element?.type === "shape") {
       const box = elementBounds(element);
@@ -663,7 +693,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     }
     const appendStroke = element?.type === "stroke" && page.elements[page.elements.length - 1] === element;
     this.currentElementId = null; this.currentRawPoints = []; this.shapeDragStart = null; this.pointerPageId = null; this.markChanged();
-    const overlay = this.overlays.get(pageId); if (overlay) prepareCanvas(overlay, page);
+    const overlay = this.overlays.get(pageId); if (overlay) { prepareCanvas(overlay, page); overlay.style.opacity = "1"; }
     if (appendStroke) { const context = canvas.getContext("2d"); if (context) drawInkStroke(context, element); }
     else this.redrawPage(pageId);
   }
@@ -746,10 +776,22 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     const shape = await constructionDialog(page, kind, this.canvases.get(page.id), this.plugin.settings.penColor, this.plugin.settings.penSize);
     if (shape && this.page(page.id) === page) { this.remember(); page.elements.push(shape); this.markChanged(); this.redrawPage(page.id); }
   }
-  private async insertText(): Promise<void> {
+  private async insertText(table = false): Promise<void> {
     const page = this.activePage(); if (!page) return;
-    const text = await textDialog(page, this.plugin.settings.penColor);
-    if (text && this.page(page.id) === page) { this.remember(); page.elements.push(text); this.markChanged(); this.redrawPage(page.id); }
+    await this.editTextElement(page, undefined, table);
+  }
+  private async editTextElement(page: HandwritingPage, original?: import("./document").TextElement, table = false): Promise<void> {
+    if(this.objectEditing) return;
+    const surface=this.canvases.get(page.id)?.parentElement; if(!surface) return;
+    this.objectEditing=true;
+    this.optionsPanel.hidden=true;
+    this.toolbar.querySelectorAll<HTMLElement>("[aria-expanded]").forEach(control=>control.setAttribute("aria-expanded","false"));
+    this.toolbar.inert=true; this.editButton.disabled=true;
+    const add=this.pagesEl.querySelector<HTMLButtonElement>(".hp-page-add"); if(add) add.disabled=true;
+    try {
+      const text=await editNotebookText(page, this.plugin.settings.penColor, surface, original, table);
+      if(text && this.page(page.id)===page) { this.remember(); const index=original ? page.elements.indexOf(original) : -1; if(index>=0) page.elements[index]=text; else page.elements.push(text); this.markChanged(); this.redrawPage(page.id); }
+    } finally { this.objectEditing=false; this.toolbar.inert=false; this.editButton.disabled=false; if(add) add.disabled=false; }
   }
   private registerBaseline(page: HandwritingPage, baseline: number): void {
     if (!Number.isFinite(baseline) || baseline <= 0 || baseline >= page.height) return;
@@ -762,8 +804,10 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     const frame = this.pagesEl.querySelector<HTMLElement>(`[data-page-id="${page.id}"]`); if (frame) setPaperClass(frame, paper); this.markChanged();
   }
   private addPage(): void {
-    this.remember(); const page = createPage(this.activePage()?.paper ?? this.plugin.settings.defaultPaper); this.document.pages.push(page); this.activePageId = page.id; this.rebuildPages(); this.markChanged();
-    requestAnimationFrame(() => this.pagesEl.lastElementChild?.scrollIntoView({ behavior: "smooth", block: "nearest" }));
+    this.remember(); const last=this.document.pages[this.document.pages.length-1]; const page = createPage(last?.paper ?? this.plugin.settings.defaultPaper);
+    if(last) { page.width=last.width; page.height=last.height; page.format=last.format; }
+    this.document.pages.push(page); this.activePageId = page.id; this.rebuildPages(); this.markChanged();
+    requestAnimationFrame(() => this.pagesEl.querySelector(`[data-page-id="${page.id}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }
   private async renderExportCanvas(page: HandwritingPage): Promise<HTMLCanvasElement> {
     const images = page.elements.filter((element): element is ImageElement => element.type === "image");
@@ -914,16 +958,20 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
   private drawLaser(pageId: string): void {
     const page = this.page(pageId), overlay = this.overlays.get(pageId);
     if (!page || !overlay) return;
+    overlay.style.opacity="1";
     const context = prepareCanvas(overlay, page);
     if (context && this.transientLaser) drawInkStroke(context, this.transientLaser, true);
   }
   private redrawPage(pageId: string): void {
     const page = this.page(pageId), canvas = this.canvases.get(pageId);
     if (!page || !canvas) return;
-    const active = this.pointerPageId === pageId && this.tool === "pen" ? page.elements.find(e => e.id === this.currentElementId && e.type === "stroke") as StrokeElement | undefined : undefined;
+    const active = this.pointerPageId === pageId && (this.tool === "pen" || this.tool === "highlight") ? page.elements.find(e => e.id === this.currentElementId && (e.type === "stroke" || e.type === "highlight")) as StrokeElement | HighlightElement | undefined : undefined;
     drawPage(canvas, active ? { ...page, elements: page.elements.filter(e => e !== active) } : page);
     const overlay = this.overlays.get(pageId);
-    if (overlay) { const context = prepareCanvas(overlay, page); if (context && active) drawInkStroke(context, active); }
+    if (overlay) {
+      const context = prepareCanvas(overlay, page); overlay.style.opacity=active?.type==="highlight" ? String(active.opacity) : "1";
+      if(context && active) { if(active.type==="highlight") drawNotebookMarker(context,{...active,opacity:1}); else drawInkStroke(context,active); }
+    }
   }
   private redrawAll(): void { for (const page of this.document.pages) this.redrawPage(page.id); }
 }

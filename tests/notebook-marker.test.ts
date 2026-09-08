@@ -1,0 +1,16 @@
+import assert from "node:assert/strict";
+import { createDocument, HighlightElement, parseDocument } from "../src/document";
+import { drawNotebookMarker, snapMarkerToText } from "../src/notebook-marker";
+const page=createDocument("grid").pages[0];
+const marker:HighlightElement={type:"highlight",id:"m",x1:30,x2:80,y:50,size:30,color:"#ffdd00",opacity:.28,points:[{x:30,y:50,pressure:.5},{x:80,y:50,pressure:.5}]};
+let strokes=0; const context={save(){},restore(){},measureText(s:string){return {width:s.length*10};},beginPath(){},moveTo(){},lineTo(){},stroke(){strokes++;}} as unknown as CanvasRenderingContext2D;
+assert.equal(snapMarkerToText(page,marker,context)[0],marker,"free marker gestures must survive");
+page.elements.push({type:"stroke",id:"ink",size:4,color:"#111",points:[{x:30,y:50,pressure:.5},{x:80,y:50,pressure:.5}]});
+assert.equal(snapMarkerToText(page,marker,context)[0],marker,"arbitrary ink must not be treated as text");
+page.elements.push({type:"text",id:"text",x:20,baseline:65,width:300,height:50,fontSize:20,color:"#111",text:"Hallo Welt",fontFamily:"sans"});
+const snapped=snapMarkerToText(page,marker,context);
+assert.equal(snapped.length,1); assert.equal(snapped[0].points,undefined); assert.equal(snapped[0].x1,20); assert.equal(snapped[0].x2,120);
+drawNotebookMarker(context,marker); assert.equal(strokes,1,"one translucent pass avoids dark overlapping segments");
+const doc=createDocument("blank"); doc.pages[0].elements.push({type:"text",id:"grid",x:40,baseline:68,width:400,height:200,fontSize:28,color:"#111",text:"A\tB",table:{cells:[["A","B"]]}});
+assert.deepEqual(parseDocument(JSON.parse(JSON.stringify(doc)))!.document.pages[0].elements,doc.pages[0].elements,"table cells persist across reload");
+console.log("Notebook marker and table persistence tests passed");

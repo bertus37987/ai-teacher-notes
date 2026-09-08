@@ -1,5 +1,6 @@
 /** Consistent outline icons; paths are application-owned, never user markup. */
 const paths: Record<string, string> = {
+  'Text und Tabellen auswählen': 'M5 3l14 9-7 1-3 7z',
   Stift: 'M4 20l4-1L20 7l-3-3L5 16z M14 7l3 3',
   'Intelligenter Markierer': 'M5 16l8-12 6 4-8 12z M4 20h8 M7 13l6 4',
   Radierer: 'M4 14l9-10 7 6-9 10H8z M9 9l7 6 M11 20h10',
@@ -33,6 +34,15 @@ export function rangeControl(parent: HTMLElement, name: string, value: number, m
   label.append(title, output, input); parent.append(label); return input;
 }
 
+export function switchControl(parent: HTMLElement, name: string, checked: boolean, update: (on: boolean) => void): HTMLInputElement {
+  const label = document.createElement("label"); label.className = "hp-switch-row";
+  const text = document.createElement("span"); text.textContent = name;
+  const input = document.createElement("input"); input.type = "checkbox"; input.checked = checked;
+  input.setAttribute("role", "switch"); input.setAttribute("aria-label", name);
+  input.onchange = () => update(input.checked);
+  label.append(text, input); parent.append(label); return input;
+}
+
 export function rgbPicker(parent: HTMLElement, initial: string, update: (hex: string) => void): { setColor: (hex: string) => void } {
   const host = document.createElement("div"); host.className = "hp-rgb-picker"; parent.append(host);
   const native = document.createElement("input"); native.type = "color"; native.setAttribute("aria-label", "Farbspektrum");
@@ -50,5 +60,11 @@ export function rgbPicker(parent: HTMLElement, initial: string, update: (hex: st
     update(value);
   }
   native.oninput = () => setColor(native.value); hex.onchange = () => setColor(hex.value);
+  const presets = document.createElement("div"); presets.className = "hp-color-presets";
+  for (const [name, value] of [["Schwarz", "#202124"], ["Blau", "#2457e6"], ["Rot", "#d93025"], ["Grün", "#16833b"], ["Gelb", "#ffd84d"]]) {
+    const button = document.createElement("button"); button.type = "button"; button.title = name; button.setAttribute("aria-label", name);
+    button.style.backgroundColor = value; button.onclick = () => { setColor(value); native.dispatchEvent(new Event("change", { bubbles: true })); }; presets.append(button);
+  }
+  host.prepend(presets);
   setColor(initial); return { setColor };
 }

@@ -235,6 +235,19 @@ export function wrapTextLines(text: string, width: number, blockStyle: TextEleme
 }
 
 export function drawText(context: CanvasRenderingContext2D, text: TextElement, fontFamily?: string): void {
+  if(text.table?.cells.length) {
+    const cells=text.table.cells, rows=cells.length, columns=Math.max(1,...cells.map(row=>row.length));
+    const height=text.height ?? rows*48, cw=text.width/columns, rh=height/rows, top=text.baseline-text.fontSize;
+    context.save(); context.font=`${text.fontStyle ?? "normal"} ${text.fontWeight ?? 400} ${text.fontSize}px ${textFontFamilies.sans}`;
+    context.lineWidth=1; context.strokeStyle="#b9c5d3";
+    cells.forEach((row,r)=>row.forEach((value,c)=> {
+      const x=text.x+c*cw, y=top+r*rh; context.fillStyle=r===0 ? "#edf3fa" : "#ffffff"; context.fillRect(x,y,cw,rh); context.strokeRect(x,y,cw,rh);
+      context.save(); context.beginPath(); context.rect(x+5,y+2,Math.max(0,cw-10),Math.max(0,rh-4)); context.clip(); context.fillStyle=text.color;
+      context.textAlign=text.textAlign ?? "left";
+      const tx=text.textAlign==="center" ? x+cw/2 : text.textAlign==="right" ? x+cw-8 : x+8;
+      wrapTextLines(value,Math.max(1,cw-16),"body",line=>context.measureText(line).width).forEach((line,i)=>context.fillText(line,tx,y+text.fontSize+6+i*text.fontSize*1.25)); context.restore();
+    })); context.restore(); return;
+  }
   const family = fontFamily ?? textFontFamilies[text.fontFamily ?? "sans"];
   if (text.renderStyle === "sketch") { context.save(); context.globalAlpha *= .18; context.translate(.9, -.55); drawText(context, { ...text, renderStyle: "clean" }, family); context.restore(); }
   context.save(); context.fillStyle = text.onFilledSurface ? text.color : visibleInkColor(text.color); context.font = textFontString(text, family);

@@ -33,6 +33,8 @@ export interface StrokeElement extends InkStroke, ElementMeta {
 }
 
 export interface TextElement extends ElementMeta {
+  /** Simple spreadsheet-style grid. Stored as text for search and portable fallback. */
+  table?: { cells: string[][] };
   type: "text";
   id: string;
   x: number;
