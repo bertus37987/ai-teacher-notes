@@ -13,6 +13,8 @@ import { constructionDialog } from "./construction-dialog";
 import { drawText } from "./rendering";
 import { drawLiveInk } from "./live-ink";
 import { textDialog } from "./text-dialog";
+import { abortable } from "./abortable";
+import type { PDFDocumentProxy } from "pdfjs-dist";
 
 type Tool = "pen" | "highlight" | "eraser" | "laser" | "fill" | ShapeDragTool;
 
@@ -225,6 +227,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
   private wordTimers = new Map<string, number>();
   private dirty = false;
   private importing = false;
+  private importAbort: AbortController | null = null;
   private editing = false;
   private expanded = false;
   private pendingStrokes = new Map<string, Set<string>>();
@@ -260,6 +263,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
   }
 
   onunload(): void {
+    this.importAbort?.abort();
     this.recognizer?.dispose();
     if (this.pointerPageId) { this.dirty = true; this.pointerPageId = null; }
     this.restoreFromPortal();
@@ -777,8 +781,13 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     if (this.importing) return;
     if (files.some(file => file.size > 20 * 1024 * 1024)) { new Notice("Bitte Dateien bis 20 MB verwenden."); return; }
     const busy = document.createElement("dialog"); busy.className = "hp-review";
-    busy.textContent = "Dokument wird lokal vorbereitet …"; busy.setAttribute("aria-label", "PDF-Import");
-    busy.oncancel = event => event.preventDefault(); document.body.append(busy); busy.showModal();
+    const progress = document.createElement("p"); progress.textContent = "Dokument wird lokal vorbereitet …"; progress.setAttribute("role", "status");
+    const cancelImport = document.createElement("button"); cancelImport.textContent = "Import abbrechen";
+    const controller = new AbortController(); this.importAbort = controller;
+    const deadline = window.setTimeout(() => controller.abort(), 120000);
+    cancelImport.onclick = () => controller.abort();
+    busy.append(progress, cancelImport); busy.setAttribute("aria-label", "PDF-Import");
+    busy.oncancel = event => { event.preventDefault(); controller.abort(); }; document.body.append(busy); busy.showModal();
     this.importing = true;
     const emptyStartPage = this.document.pages.length === 1 && this.document.pages[0].elements.length === 0 && files.every(file => file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) ? this.document.pages[0].id : null;
     this.remember(); let imageTargetUsed = false; let importedPages = 0;
@@ -786,25 +795,27 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
       this.setStatus("Importiere Datei …");
       for (const file of files) {
         if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
-          const pdfjs = await loadPdfJs();
+          const pdfjs = await abortable(loadPdfJs(), controller.signal);
           const loadingTask = pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) });
           try {
-          const pdf = await loadingTask.promise;
+          const pdf = await abortable<PDFDocumentProxy>(loadingTask.promise, controller.signal);
           if (pdf.numPages > 40) throw new Error("Bitte PDFs mit höchstens 40 Seiten verwenden.");
           for (let number = 1; number <= pdf.numPages; number += 1) {
-            busy.textContent = `PDF wird vorbereitet: Seite ${number} von ${pdf.numPages} …`;
-            const sourcePage = await pdf.getPage(number); const originalViewport = sourcePage.getViewport({ scale: 1 });
+            progress.textContent = `PDF wird vorbereitet: Seite ${number} von ${pdf.numPages} …`;
+            const sourcePage = await abortable(pdf.getPage(number), controller.signal); const originalViewport = sourcePage.getViewport({ scale: 1 });
             const viewport = sourcePage.getViewport({ scale: Math.min(2, 1600 / Math.max(originalViewport.width, originalViewport.height)) });
             const canvas = document.createElement("canvas"); canvas.width = Math.ceil(viewport.width); canvas.height = Math.ceil(viewport.height);
             const context = canvas.getContext("2d"); if (!context) throw new Error("PDF-Canvas nicht verfügbar");
-            await sourcePage.render({ canvasContext: context, viewport }).promise;
+            // Offscreen rasterization must not wait for display-frame callbacks in a background host.
+            const render = sourcePage.render({ canvas, canvasContext: context, viewport, intent: "print" });
+            try { await abortable(render.promise, controller.signal); } finally { if (controller.signal.aborted) render.cancel(); }
             const page = createPage("blank"); page.width = canvas.width; page.height = canvas.height; page.format = "custom";
             this.placeImage(page, canvas.toDataURL("image/jpeg", 0.92), "image/jpeg", `${file.name} – Seite ${number}`, canvas.width, canvas.height);
             this.document.pages.push(page); this.activePageId = page.id; importedPages += 1;
           }
-          } finally { await loadingTask.destroy(); }
+          } finally { void loadingTask.destroy().catch(() => {}); }
         } else if (file.type === "image/png" || file.type === "image/jpeg" || /\.(png|jpe?g)$/i.test(file.name)) {
-          const dataUrl = await readDataUrl(file); const image = await loadHtmlImage(dataUrl);
+          const dataUrl = await abortable(readDataUrl(file), controller.signal); const image = await abortable(loadHtmlImage(dataUrl), controller.signal);
           const useCurrentPage = !imageTargetUsed && importedPages === 0;
           const page = useCurrentPage ? this.activePage() ?? createPage("blank") : createPage("blank");
           if (!this.document.pages.includes(page)) this.document.pages.push(page);
@@ -821,7 +832,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
       const previous = this.history.pop(); if (previous) this.document = previous;
       this.activePageId = this.document.pages[0].id; this.rebuildPages();
       new Notice(`Import fehlgeschlagen: ${error instanceof Error ? error.message : String(error)}`); this.setStatus("");
-    } finally { this.importing = false; busy.close(); busy.remove(); if (this.dirty) this.scheduleSave(); }
+    } finally { window.clearTimeout(deadline); this.importAbort = null; this.importing = false; busy.close(); busy.remove(); if (this.dirty) this.scheduleSave(); }
   }
   private clearAll(): void {
     if (!window.confirm("Wirklich alle Seiten dieser Handschriftnotiz leeren? Rückgängig stellt sie wieder her.")) return;
