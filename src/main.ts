@@ -14,6 +14,8 @@ import { drawText } from "./rendering";
 import { drawLiveInk } from "./live-ink";
 import { textDialog } from "./text-dialog";
 import { abortable } from "./abortable";
+import { applyDockIcons, rangeControl, rgbPicker } from "./editor-controls";
+import { EditorSnapshots } from "./editor-history";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
 type Tool = "pen" | "highlight" | "eraser" | "laser" | "fill" | ShapeDragTool;
@@ -23,6 +25,8 @@ export interface SmoothHandwritingSettings {
   folder: string;
   defaultPaper: Paper;
   shapeOptimization: boolean;
+  shapeImprovement: number;
+  laserSize: number;
   wordDelay: number;
   markerColor: string;
   markerSize: number;
@@ -35,7 +39,7 @@ export interface SmoothHandwritingSettings {
 }
 
 const DEFAULT_SETTINGS: SmoothHandwritingSettings = {
-  settingsVersion: 3, folder: "Handwriting", defaultPaper: "grid", shapeOptimization: true, wordDelay: 800,
+  settingsVersion: 3, folder: "Handwriting", defaultPaper: "grid", shapeOptimization: true, shapeImprovement: 0.7, laserSize: 6, wordDelay: 800,
   markerColor: "#ffd84d", markerSize: 34, penColor: "#202124", penSize: 4,
   fillColor: "#7c5cff", fillOpacity: 0.24, pressureEnabled: true, pressureSensitivity: 0.72
 };
@@ -73,6 +77,13 @@ export function drawInkStroke(context: CanvasRenderingContext2D, stroke: InkStro
     context.fill();
     context.restore();
     return;
+  }
+  if (laser) {
+    // One glow pass for the complete tail, not one blurred pass per segment.
+    context.lineWidth = stroke.size;
+    context.beginPath(); context.moveTo(stroke.points[0].x, stroke.points[0].y);
+    for (let i = 1; i < stroke.points.length; i++) context.lineTo(stroke.points[i].x, stroke.points[i].y);
+    context.stroke(); context.restore(); return;
   }
   for (let index = 0; index < stroke.points.length - 1; index += 1) {
     const before = stroke.points[index];
@@ -216,6 +227,9 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
   private tool: Tool = "pen";
   private activePageId: string;
   private readonly canvases = new Map<string, HTMLCanvasElement>();
+  private readonly overlays = new Map<string, HTMLCanvasElement>();
+  private laserFrame: number | null = null;
+  private snapshots = new EditorSnapshots();
   private observers: ResizeObserver[] = [];
   private history: HandwritingDocumentV3[] = [];
   private future: HandwritingDocumentV3[] = [];
@@ -263,6 +277,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
   }
 
   onunload(): void {
+    if (this.laserFrame !== null) cancelAnimationFrame(this.laserFrame);
     this.importAbort?.abort();
     this.recognizer?.dispose();
     if (this.pointerPageId) { this.dirty = true; this.pointerPageId = null; }
@@ -321,12 +336,29 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     toolGroup.createEl("button", { text: "⇧", attr: { "aria-label": "PDF hochladen", title: "PDF hochladen" } }).onclick = () => pdfInput.click();
     pdfInput.onchange = () => { const files = Array.from(pdfInput.files ?? []); pdfInput.value = ""; if (files.length) void this.importFiles(files); };
     const more = toolGroup.createEl("button", { text: "•••", attr: { "aria-label": "Weitere Werkzeuge", "aria-expanded": "false" } });
-    more.onclick = () => { this.optionsPanel.hidden = !this.optionsPanel.hidden; more.setAttribute("aria-expanded", String(!this.optionsPanel.hidden)); };
+    const colorButton = toolGroup.createEl("button", { cls: "hp-rgb-toggle", attr: { "aria-label": "RGB-Farbe auswählen", title: "RGB-Farbe auswählen", "aria-expanded": "false" } });
+    toolGroup.insertBefore(colorButton, more);
+    const colorPanel = this.toolbar.createDiv("hp-color-panel"); colorPanel.hidden = true;
+    const colorTarget = colorPanel.createEl("select", { attr: { "aria-label": "Farbe für" } });
+    for (const [value, text] of [["penColor", "Stift"], ["markerColor", "Marker"], ["fillColor", "Füllung"]]) colorTarget.createEl("option", { value, text });
+    const rgb = rgbPicker(colorPanel, this.plugin.settings.penColor, value => {
+      const target = colorTarget.value as "penColor" | "markerColor" | "fillColor";
+      this.plugin.settings[target] = value;
+      colorButton.style.setProperty("--hp-selected-color", value);
+      this.updateReticleStyle();
+    });
+    colorPanel.addEventListener("change", () => void this.plugin.persistSettings());
+    colorTarget.onchange = () => rgb.setColor(this.plugin.settings[colorTarget.value as "penColor" | "markerColor" | "fillColor"]);
+    colorButton.onclick = () => { colorPanel.hidden = !colorPanel.hidden; colorButton.setAttribute("aria-expanded", String(!colorPanel.hidden)); if (!colorPanel.hidden) { this.optionsPanel.hidden = true; more.setAttribute("aria-expanded", "false"); } };
+    applyDockIcons(toolGroup);
+    more.onclick = () => { this.optionsPanel.hidden = !this.optionsPanel.hidden; more.setAttribute("aria-expanded", String(!this.optionsPanel.hidden)); colorPanel.hidden = true; colorButton.setAttribute("aria-expanded", "false"); };
     const writing = this.labeledControl("Handschrift");
     writing.addClass("hp-text-controls");
-    const writingLabel = writing.createEl("label", { text: "Buchstaben schützen" });
-    const writingMode = writingLabel.createEl("input", { type: "checkbox", attr: { "aria-label": "Buchstaben schützen" } }); writingMode.checked = true;
-    writingMode.onchange = () => { this.handwritingMode = writingMode.checked; this.clearPendingNormalization(); };
+    rangeControl(writing, "Buchstaben schützen", 1, 0, 1, 1, value => { this.handwritingMode = value === 1; this.clearPendingNormalization(); }, value => value ? "An" : "Aus");
+    rangeControl(writing, "Improve shapes", this.plugin.settings.shapeOptimization ? this.plugin.settings.shapeImprovement : 0, 0, 1, .05, value => { this.plugin.settings.shapeImprovement = value; this.plugin.settings.shapeOptimization = value > 0; }, value => value ? `${Math.round(value * 100)} %` : "Aus");
+    writing.createEl("small", { text: "Formkorrektur im Zeichenmodus: Buchstaben schützen ausschalten. Höhere Werte erkennen großzügiger." });
+    rangeControl(writing, "Korrekturpause", this.plugin.settings.wordDelay, 400, 1500, 50, value => { this.plugin.settings.wordDelay = value; }, value => `${value} ms`);
+    this.optionsPanel.addEventListener("change", () => void this.plugin.persistSettings());
     writing.createEl("button", { text: "Lesbar machen" }).onclick = () => void this.recognizeHandwriting();
     writing.createEl("button", { text: "Original wiederherstellen" }).onclick = () => {
       const page = this.activePage(); if (!page) return; this.remember();
@@ -350,30 +382,19 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     for (const color of ["#202124", "#2457e6", "#d93025", "#16833b", "#7c3aed"]) {
       const swatch = colorGroup.createEl("button", { cls: "hp-color-swatch", attr: { "aria-label": color, title: color } });
       swatch.style.setProperty("--hp-swatch", color);
-      swatch.addEventListener("click", () => { this.plugin.settings.penColor = color; void this.plugin.persistSettings(); this.updateReticleStyle(); });
+      swatch.addEventListener("click", () => { colorTarget.value = "penColor"; rgb.setColor(color); void this.plugin.persistSettings(); });
     }
-    const penColor = colorGroup.createEl("input", { type: "color", value: this.plugin.settings.penColor, attr: { "aria-label": "Eigene Stiftfarbe" } });
-    penColor.addEventListener("input", () => { this.plugin.settings.penColor = penColor.value; void this.plugin.persistSettings(); this.updateReticleStyle(); });
+    colorGroup.createEl("button", { text: "RGB mischen", attr: { "aria-label": "Eigene Stiftfarbe" } }).onclick = () => { colorTarget.value = "penColor"; rgb.setColor(this.plugin.settings.penColor); colorButton.click(); };
     const sizeGroup = this.labeledControl("Stärke");
-    const size = sizeGroup.createEl("input", { type: "range", value: String(this.plugin.settings.penSize), attr: { min: "1", max: "18", step: "0.5", "aria-label": "Stiftstärke" } });
-    size.addEventListener("input", () => { this.plugin.settings.penSize = Number(size.value); void this.plugin.persistSettings(); this.updateReticleStyle(); });
+    rangeControl(sizeGroup, "Stiftstärke", this.plugin.settings.penSize, 1, 18, .5, value => { this.plugin.settings.penSize = value; this.updateReticleStyle(); }, value => `${value} px`);
+    rangeControl(sizeGroup, "Markerstärke", this.plugin.settings.markerSize, 18, 64, 2, value => { this.plugin.settings.markerSize = value; this.updateReticleStyle(); }, value => `${value} px`);
+    rangeControl(sizeGroup, "Laserstärke", this.plugin.settings.laserSize, 2, 16, 1, value => { this.plugin.settings.laserSize = value; }, value => `${value} px`);
     const fillGroup = this.labeledControl("Formfüllung");
     const fill = fillGroup.createEl("input", { type: "color", value: this.plugin.settings.fillColor, attr: { "aria-label": "Füllfarbe" } });
     fill.addEventListener("input", () => { this.plugin.settings.fillColor = fill.value; void this.plugin.persistSettings(); });
-    const fillToggle = fillGroup.createEl("input", { type: "checkbox", attr: { "aria-label": "Formfüllung aktivieren", title: "Formfüllung an/aus" } });
-    fillToggle.checked = this.plugin.settings.fillOpacity > 0;
-    fillToggle.addEventListener("change", () => {
-      this.plugin.settings.fillOpacity = fillToggle.checked ? Math.max(0.24, Number(fillOpacity.value)) : 0;
-      fillOpacity.value = String(this.plugin.settings.fillOpacity); void this.plugin.persistSettings();
-    });
-    const fillOpacity = fillGroup.createEl("input", { type: "range", value: String(this.plugin.settings.fillOpacity), attr: { min: "0", max: "0.8", step: "0.05", "aria-label": "Deckkraft der Füllung" } });
-    fillOpacity.addEventListener("input", () => { this.plugin.settings.fillOpacity = Number(fillOpacity.value); fillToggle.checked = this.plugin.settings.fillOpacity > 0; void this.plugin.persistSettings(); });
+    rangeControl(fillGroup, "Deckkraft der Füllung", this.plugin.settings.fillOpacity, 0, .8, .05, value => { this.plugin.settings.fillOpacity = value; }, value => value ? `${Math.round(value * 100)} %` : "Aus");
     const pressureGroup = this.labeledControl("Druck");
-    const pressureToggle = pressureGroup.createEl("input", { type: "checkbox", attr: { "aria-label": "Drucksensitivität" } });
-    pressureToggle.checked = this.plugin.settings.pressureEnabled;
-    pressureToggle.addEventListener("change", () => { this.plugin.settings.pressureEnabled = pressureToggle.checked; void this.plugin.persistSettings(); });
-    const pressure = pressureGroup.createEl("input", { type: "range", value: String(this.plugin.settings.pressureSensitivity), attr: { min: "0", max: "1", step: "0.05", "aria-label": "Stärke der Drucksensitivität" } });
-    pressure.addEventListener("input", () => { this.plugin.settings.pressureSensitivity = Number(pressure.value); void this.plugin.persistSettings(); });
+    rangeControl(pressureGroup, "Drucksensitivität", this.plugin.settings.pressureEnabled ? this.plugin.settings.pressureSensitivity : 0, 0, 1, .05, value => { this.plugin.settings.pressureSensitivity = value; this.plugin.settings.pressureEnabled = value > 0; }, value => value ? `${Math.round(value * 100)} %` : "Aus");
     const pageGroup = this.labeledControl("Seite");
     this.paperSelect = pageGroup.createEl("select", { attr: { "aria-label": "Papierart" } });
     this.paperSelect.createEl("option", { value: "grid", text: "Kariert" });
@@ -476,6 +497,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
   private rebuildPages(): void {
     this.disconnectObservers();
     this.canvases.clear();
+    this.overlays.clear();
     this.pagesEl.empty();
     for (const [index, page] of this.document.pages.entries()) {
       const frame = this.pagesEl.createDiv("hp-page");
@@ -483,7 +505,10 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
       frame.toggleClass("is-active", page.id === this.activePageId);
       setPaperClass(frame, page.paper);
       frame.createDiv({ cls: "hp-page-label", text: `Seite ${index + 1}` });
-      const canvas = frame.createEl("canvas", { attr: { "aria-label": `Handschrift Seite ${index + 1}` } });
+      const surface = frame.createDiv("hp-canvas-stack");
+      const canvas = surface.createEl("canvas", { attr: { "aria-label": `Handschrift Seite ${index + 1}` } });
+      const overlay = surface.createEl("canvas", { cls: "hp-live-overlay", attr: { "aria-hidden": "true" } });
+      this.overlays.set(page.id, overlay);
       canvas.style.aspectRatio = `${page.width} / ${page.height}`;
       canvas.addEventListener("pointerenter", (event) => this.updateReticle(event));
       canvas.addEventListener("pointerleave", () => this.reticle.removeClass("is-visible"));
@@ -538,10 +563,10 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     event.preventDefault(); this.setActivePage(pageId); canvas.setPointerCapture(event.pointerId); this.pointerPageId = pageId;
     const point = this.toPoint(event, page, canvas);
     if (this.tool === "laser") {
-      this.transientLaser = { id: "laser", color: "#ff1744", size: Math.max(5, this.plugin.settings.penSize * 1.35), pressureSensitivity: 0, points: [point] };
-      this.redrawPage(pageId); return;
+      this.transientLaser = { id: "laser", color: "#ff1744", size: this.plugin.settings.laserSize, pressureSensitivity: 0, points: [point] };
+      this.drawLaser(pageId); return;
     }
-    this.remember();
+    this.remember(this.tool === "pen" && this.handwritingMode);
     if (this.tool === "eraser") { this.eraseAt(page, point); return; }
     if (this.tool === "fill") {
       const target = [...page.elements].reverse().find((element): element is ShapeElement => element.type === "shape" && shapeContainsPoint(element, point));
@@ -563,7 +588,10 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
       const element: StrokeElement = { type: "stroke", id: crypto.randomUUID(), color: this.plugin.settings.penColor, size: this.plugin.settings.penSize, pressureSensitivity: this.plugin.settings.pressureEnabled ? this.plugin.settings.pressureSensitivity : 0, points: [point] };
       page.elements.push(element); this.currentElementId = element.id; this.currentRawPoints = [point];
     }
-    this.redrawPage(pageId);
+    if (this.tool === "pen") {
+      const overlay = this.overlays.get(pageId);
+      if (overlay) { const context = prepareCanvas(overlay, page); if (context) drawInkStroke(context, page.elements[page.elements.length - 1] as StrokeElement); }
+    } else this.redrawPage(pageId);
   }
 
   private pointerMove(event: PointerEvent, pageId: string): void {
@@ -581,10 +609,14 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     event.preventDefault(); const coalesced = event.getCoalescedEvents?.(); const events = coalesced?.length ? coalesced : [event];
     if (this.tool === "laser" && this.transientLaser) {
       for (const sample of events) this.transientLaser.points.push(this.toPoint(sample, page, canvas));
-      this.redrawPage(pageId); return;
+      // A bounded tail and a separate layer keep cost independent of notebook size.
+      this.transientLaser.points = this.transientLaser.points.slice(-96);
+      if (this.laserFrame === null) this.laserFrame = requestAnimationFrame(() => { this.laserFrame = null; this.drawLaser(pageId); });
+      return;
     }
     if (this.tool === "eraser") { for (const sample of events) this.eraseAt(page, this.toPoint(sample, page, canvas)); return; }
-    const element = page.elements.find((candidate) => candidate.id === this.currentElementId);
+    const last = page.elements[page.elements.length - 1];
+    const element = last?.id === this.currentElementId ? last : page.elements.find((candidate) => candidate.id === this.currentElementId);
     if (!element) return;
     if (element.type === "highlight") {
       for (const sample of events) this.currentRawPoints.push(this.toPoint(sample, page, canvas));
@@ -598,7 +630,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
       const firstNewPoint = this.currentRawPoints.length;
       for (const sample of events) this.currentRawPoints.push(this.toPoint(sample, page, canvas));
       element.points = this.currentRawPoints;
-      const context = canvas.getContext("2d");
+      const context = this.overlays.get(pageId)?.getContext("2d");
       if (context) drawLiveInk(context, element, firstNewPoint);
       return;
     }
@@ -617,7 +649,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     if (!canvas.hasPointerCapture(event.pointerId)) return;
     if (event.type !== "pointercancel") this.pointerMove(event, pageId);
     event.preventDefault(); canvas.releasePointerCapture(event.pointerId);
-    if (this.tool === "laser") { this.transientLaser = null; this.pointerPageId = null; this.redrawPage(pageId); return; }
+    if (this.tool === "laser") { this.transientLaser = null; this.pointerPageId = null; if (this.laserFrame !== null) cancelAnimationFrame(this.laserFrame); this.laserFrame = null; this.drawLaser(pageId); return; }
     const element = page.elements.find((candidate) => candidate.id === this.currentElementId);
     if (element?.type === "stroke") { element.rawPoints = structuredClone(this.currentRawPoints); element.points = cleanCapturedStroke(this.currentRawPoints, true); if (!this.handwritingMode && !this.convertAutomaticShape(page, element)) this.queueWordStroke(pageId, element.id); }
     else if (element?.type === "highlight") {
@@ -629,12 +661,16 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
       const box = elementBounds(element);
       if (Math.max(box.maxX - box.minX, box.maxY - box.minY) < 8) page.elements = page.elements.filter((candidate) => candidate.id !== element.id);
     }
-    this.currentElementId = null; this.currentRawPoints = []; this.shapeDragStart = null; this.pointerPageId = null; this.markChanged(); this.redrawPage(pageId);
+    const appendStroke = element?.type === "stroke" && page.elements[page.elements.length - 1] === element;
+    this.currentElementId = null; this.currentRawPoints = []; this.shapeDragStart = null; this.pointerPageId = null; this.markChanged();
+    const overlay = this.overlays.get(pageId); if (overlay) prepareCanvas(overlay, page);
+    if (appendStroke) { const context = canvas.getContext("2d"); if (context) drawInkStroke(context, element); }
+    else this.redrawPage(pageId);
   }
 
   private convertAutomaticShape(page: HandwritingPage, stroke: StrokeElement): boolean {
     if (!this.plugin.settings.shapeOptimization) return false;
-    const optimized = optimizeShape(stroke);
+    const optimized = optimizeShape(stroke, this.plugin.settings.shapeImprovement);
     if (!optimized.kind) return false;
     const index = page.elements.findIndex((element) => element.id === stroke.id);
     if (index < 0) return false;
@@ -671,6 +707,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
   private async normalizeWord(pageId: string, ids: string[], epoch: number): Promise<void> {
     await Promise.resolve();
     const page = this.page(pageId); if (!page || epoch !== this.normalizationEpoch) return;
+    if (this.pointerPageId) { for (const id of ids) this.queueWordStroke(pageId, id); return; }
     const original = ids.map((id) => page.elements.find((element): element is StrokeElement => element.id === id && element.type === "stroke")).filter((stroke): stroke is StrokeElement => Boolean(stroke));
     if (original.length === 0) return;
     const signature = JSON.stringify(original); this.setStatus("Richte Handschrift aus …");
@@ -846,17 +883,22 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     this.wordTimers.clear(); this.normalizationEpoch += 1;
     this.rebuildPages(); this.markChanged(); this.setStatus("Notiz geleert – Rückgängig ist möglich");
   }
-  private remember(): void { this.future = []; this.history.push(cloneDocument(this.document)); if (this.history.length > 60) this.history.shift(); }
+  private remember(appendOnly = false): void {
+    this.future = []; this.history.push(this.snapshots.capture(this.document));
+    // Any operation that may mutate committed elements invalidates cached copies.
+    if (!appendOnly) this.snapshots.invalidate();
+    if (this.history.length > 60) this.history.shift();
+  }
   private undo(): void {
     if (this.pointerPageId) return;
-    const previous = this.history.pop(); if (!previous) return; this.future.push(cloneDocument(this.document)); this.document = previous;
+    const previous = this.history.pop(); if (!previous) return; this.future.push(cloneDocument(this.document)); this.document = cloneDocument(previous); this.snapshots.invalidate();
     if (!this.document.pages.some((page) => page.id === this.activePageId)) this.activePageId = this.document.pages[0].id;
     this.pendingStrokes.clear(); for (const timer of this.wordTimers.values()) window.clearTimeout(timer); this.wordTimers.clear(); this.normalizationEpoch += 1; this.rebuildPages(); this.markChanged();
   }
   private redo(): void {
     if (this.pointerPageId) return;
     const next = this.future.pop(); if (!next) return;
-    this.history.push(cloneDocument(this.document)); this.document = next;
+    this.history.push(cloneDocument(this.document)); this.document = cloneDocument(next); this.snapshots.invalidate();
     this.clearPendingNormalization();
     if (!this.page(this.activePageId)) this.activePageId = this.document.pages[0].id;
     this.rebuildPages(); this.markChanged();
@@ -869,7 +911,20 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     try { await this.plugin.saveDocument(this.file, this.document); if (revision === this.changeRevision) this.dirty = false; }
     catch (error) { new Notice(`Smooth Handwriting konnte nicht speichern: ${error instanceof Error ? error.message : String(error)}`); }
   }
-  private redrawPage(pageId: string): void { const page = this.page(pageId); const canvas = this.canvases.get(pageId); if (page && canvas) drawPage(canvas, page, this.pointerPageId === pageId ? this.transientLaser ?? undefined : undefined); }
+  private drawLaser(pageId: string): void {
+    const page = this.page(pageId), overlay = this.overlays.get(pageId);
+    if (!page || !overlay) return;
+    const context = prepareCanvas(overlay, page);
+    if (context && this.transientLaser) drawInkStroke(context, this.transientLaser, true);
+  }
+  private redrawPage(pageId: string): void {
+    const page = this.page(pageId), canvas = this.canvases.get(pageId);
+    if (!page || !canvas) return;
+    const active = this.pointerPageId === pageId && this.tool === "pen" ? page.elements.find(e => e.id === this.currentElementId && e.type === "stroke") as StrokeElement | undefined : undefined;
+    drawPage(canvas, active ? { ...page, elements: page.elements.filter(e => e !== active) } : page);
+    const overlay = this.overlays.get(pageId);
+    if (overlay) { const context = prepareCanvas(overlay, page); if (context && active) drawInkStroke(context, active); }
+  }
   private redrawAll(): void { for (const page of this.document.pages) this.redrawPage(page.id); }
 }
 
@@ -930,7 +985,10 @@ class SmoothHandwritingSettingTab extends PluginSettingTab {
     this.containerEl.empty();
     new Setting(this.containerEl).setName("Speicherordner").setDesc("Ordner im Vault für Handschrift und PDF-Seitendateien.").addText((text) => text.setValue(this.plugin.settings.folder).onChange(async (value) => { this.plugin.settings.folder = value; await this.plugin.persistSettings(); }));
     new Setting(this.containerEl).setName("Persönliche Wortkorrektur").setDesc("Pause, bevor Originalzüge an Baseline und persönliche Schrifthöhe angepasst werden.").addSlider((slider) => slider.setLimits(400, 1500, 50).setDynamicTooltip().setValue(this.plugin.settings.wordDelay).onChange(async (value) => { this.plugin.settings.wordDelay = value; await this.plugin.persistSettings(); }));
-    new Setting(this.containerEl).setName("Automatische Formerkennung").setDesc("Große Geraden, Ellipsen, Rechtecke und Polygone beim Absetzen erkennen.").addToggle((toggle) => toggle.setValue(this.plugin.settings.shapeOptimization).onChange(async (value) => { this.plugin.settings.shapeOptimization = value; await this.plugin.persistSettings(); }));
+    new Setting(this.containerEl).setName("Improve shapes").setDesc("0 = aus. Höhere Werte tolerieren ungenauere Geraden; Buchstabenschutz im Editor hat Vorrang.").addSlider((slider) => slider.setLimits(0, 1, .05).setDynamicTooltip().setValue(this.plugin.settings.shapeOptimization ? this.plugin.settings.shapeImprovement : 0).onChange(async (value) => { this.plugin.settings.shapeImprovement = value; this.plugin.settings.shapeOptimization = value > 0; await this.plugin.persistSettings(); }));
+    for (const [name, key, min, max, step] of [["Stiftstärke", "penSize", 1, 18, .5], ["Laserstärke", "laserSize", 2, 16, 1], ["Fülldeckkraft", "fillOpacity", 0, .8, .05], ["Drucksensitivität", "pressureSensitivity", 0, 1, .05]] as const) {
+      new Setting(this.containerEl).setName(name).addSlider(slider => slider.setLimits(min, max, step).setDynamicTooltip().setValue(this.plugin.settings[key]).onChange(async value => { this.plugin.settings[key] = value; if (key === "pressureSensitivity") this.plugin.settings.pressureEnabled = value > 0; await this.plugin.persistSettings(); }));
+    }
     new Setting(this.containerEl).setName("Standardpapier").addDropdown((dropdown) => dropdown.addOption("grid", "Kariert").addOption("lines", "Liniert").addOption("blank", "Blanko").setValue(this.plugin.settings.defaultPaper).onChange(async (value) => { this.plugin.settings.defaultPaper = value as Paper; await this.plugin.persistSettings(); }));
     new Setting(this.containerEl).setName("Markerfarbe").addColorPicker((picker) => picker.setValue(this.plugin.settings.markerColor).onChange(async (value) => { this.plugin.settings.markerColor = value; await this.plugin.persistSettings(); }));
     new Setting(this.containerEl).setName("Markerstärke").addSlider((slider) => slider.setLimits(18, 64, 2).setDynamicTooltip().setValue(this.plugin.settings.markerSize).onChange(async (value) => { this.plugin.settings.markerSize = value; await this.plugin.persistSettings(); }));

@@ -99,14 +99,14 @@ function polygonFromGesture(stroke: InkStroke, diagonal: number): InkStroke | nu
   return { ...stroke, points: clean };
 }
 
-function optimizeLine(stroke: InkStroke): InkStroke | null {
+function optimizeLine(stroke: InkStroke, toleranceScale = 1): InkStroke | null {
   const points = stroke.points;
   if (points.length < 2) return null;
   const start = points[0];
   const end = points[points.length - 1];
   const chord = distance(start, end);
-  if (chord < 80 || pathLength(points) / chord > 1.075) return null;
-  const tolerance = Math.max(4, chord * 0.028);
+  if (chord < 80 || pathLength(points) / chord > 1 + .075 * toleranceScale) return null;
+  const tolerance = Math.max(4, chord * 0.028) * toleranceScale;
   if (points.some((point) => pointLineDistance(point, start, end) > tolerance)) return null;
 
   const cleanStart = { ...start };
@@ -141,13 +141,13 @@ function optimizeArrow(stroke: InkStroke): InkStroke | null {
   return { ...stroke, points: [{ ...start }, { ...tip }] };
 }
 
-function optimizeClosedShape(stroke: InkStroke): { stroke: InkStroke; kind: OptimizedShape } | null {
+function optimizeClosedShape(stroke: InkStroke, toleranceScale = 1): { stroke: InkStroke; kind: OptimizedShape } | null {
   if (stroke.points.length < 10) return null;
   const box = bounds(stroke.points);
   const width = box.maxX - box.minX;
   const height = box.maxY - box.minY;
   const diagonal = Math.hypot(width, height);
-  if (width < 55 || height < 55 || diagonal < 90 || distance(stroke.points[0], stroke.points[stroke.points.length - 1]) > diagonal * 0.16) return null;
+  if (width < 55 || height < 55 || diagonal < 90 || distance(stroke.points[0], stroke.points[stroke.points.length - 1]) > diagonal * 0.16 * toleranceScale) return null;
 
   const edgeError = stroke.points.reduce((sum, point) => sum + Math.min(
     Math.abs(point.x - box.minX),
@@ -164,7 +164,7 @@ function optimizeClosedShape(stroke: InkStroke): { stroke: InkStroke; kind: Opti
   ));
   const radialError = radii.reduce((sum, radius) => sum + Math.abs(radius - 1), 0) / radii.length;
 
-  if (edgeError < 0.06 && radialError > 0.09) {
+  if (edgeError < 0.06 * toleranceScale && radialError > 0.09) {
     const pressure = stroke.points.reduce((sum, point) => sum + point.pressure, 0) / stroke.points.length;
     return {
       kind: "rectangle",
@@ -181,7 +181,7 @@ function optimizeClosedShape(stroke: InkStroke): { stroke: InkStroke; kind: Opti
     };
   }
 
-  if (radialError <= 0.2) {
+  if (radialError <= 0.2 * toleranceScale) {
     const first = stroke.points[0];
     const startAngle = Math.atan2((first.y - centerY) / height, (first.x - centerX) / width);
     let signedArea = 0;
@@ -205,11 +205,13 @@ function optimizeClosedShape(stroke: InkStroke): { stroke: InkStroke; kind: Opti
   return polygon ? { kind: "polygon", stroke: polygon } : null;
 }
 
-export function optimizeShape(stroke: InkStroke): { stroke: InkStroke; kind: OptimizedShape } {
+export function optimizeShape(stroke: InkStroke, strength = .7): { stroke: InkStroke; kind: OptimizedShape } {
+  if (strength <= 0) return { stroke, kind: null };
+  const toleranceScale = .5 + Math.min(1, strength) / 1.4;
   const arrow = optimizeArrow(stroke);
   if (arrow) return { stroke: arrow, kind: "arrow" };
-  const line = optimizeLine(stroke);
+  const line = optimizeLine(stroke, toleranceScale);
   if (line) return { stroke: line, kind: "line" };
-  const closed = optimizeClosedShape(stroke);
+  const closed = optimizeClosedShape(stroke, toleranceScale);
   return closed ?? { stroke, kind: null };
 }
