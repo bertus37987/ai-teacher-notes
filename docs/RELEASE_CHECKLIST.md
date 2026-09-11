@@ -5,7 +5,7 @@ Messmethode: echtes DOM, berechnete Stile, Pixelproben — nicht nur Quelltext-L
 
 Spalten: **Funktion** · **Ergebnis** · **Beleg** · **Anmerkung**
 
-**Ergebnis: 68 PASS · 0 FAIL · 5 UNCOMPLETED**
+**Ergebnis: 67 PASS · 0 FAIL · 5 UNCOMPLETED**
 
 ## 1. Funktion (jede Bedienung einzeln ausgelöst)
 
