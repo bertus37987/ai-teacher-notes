@@ -103,6 +103,58 @@ kannst du behalten.
 | Zu wenig CPU-Takt | `intel_pstate` aktiv, EPP `balance_performance` → **kein Notlauf** |
 | X11 statt Wayland ist schuld | XWayland ist bewusst gesetzt, weil Electron unter Wayland die Stift**ereignisse** verliert → **notwendig** |
 
+## 4b. Der einzige Hebel, der laut Bugreport wirklich hilft
+
+Im Bugreport (input-wacom#428) berichtet ein zweiter Betroffener mit **derselben**
+Yoga-Baureihe: „The behavior seems to get better when enabling full preemptive in the
+kernel parameters, but it still exists."
+
+Das ist hier gefahrlos und **ohne Kernel-Neubau** möglich, weil dieser Kernel mit
+`CONFIG_PREEMPT_DYNAMIC=y` gebaut ist — die Vorrangstufe ist zur Laufzeit wählbar:
+
+```bash
+sudo grubby --update-kernel=ALL --args="preempt=full"
+# danach Neustart
+```
+
+Prüfen nach dem Neustart:
+```bash
+cat /proc/cmdline | grep -o 'preempt=[a-z]*'      # erwartet: preempt=full
+```
+
+Zurücknehmen:
+```bash
+sudo grubby --update-kernel=ALL --remove-args="preempt=full"
+```
+
+Ehrlich dazu: Es behebt den Treiberfehler **nicht** (der ist offen), macht ihn aber
+nach Einschätzung der Betroffenen seltener. Der Preis sind etwas höhere Latenzspitzen
+an anderer Stelle, weil der Kernel häufiger unterbricht. Teste es eine Woche — es ist
+mit einem Befehl und einem Neustart wieder weg.
+
+## 4c. Weitere geprüfte Schrauben
+
+**Energieprofil ist nicht installiert.** `powerprofilesctl` fehlt, weil das Paket fehlt:
+
+```bash
+sudo dnf install power-profiles-daemon
+powerprofilesctl set performance     # danach ohne sudo nutzbar
+```
+
+**`touch_arbitration`** steuert die Handballen-Abweisung zwischen Finger und Stift
+(aktuell `Y`). Im Bugreport als Testkandidat genannt, aber **nicht** belegt. Wenn dich
+stört, dass der Handballen den Stift gelegentlich ausbremst, kannst du es testweise
+abschalten — dann verschwindet allerdings auch der Schutz gegen versehentliches
+Tippen mit dem Handballen:
+
+```bash
+sudo modprobe -r wacom && sudo modprobe wacom touch_arbitration=N
+```
+
+**Nicht verfügbar ohne root:** `/sys/module/wacom/parameters/*` und
+`/sys/bus/usb/devices/*/authorized` sind nur für root schreibbar (hier geprüft).
+Deshalb gibt es `scripts/pen-health.sh` — es bündelt Prüfung und Reset hinter `sudo`.
+
 ## 5. Die Reihenfolge, in der ich vorgehen würde
 
 1. **Abtastrate messen** — die Stift-Diagnose (Strg+P) zeigt jetzt den Probenabstand als
@@ -114,14 +166,17 @@ kannst du behalten.
    - **Streuung ×6 oder mehr:** Das ist der Treiberfehler aus Abschnitt 2.
 2. **Bei Streuung:** Treiber zurücksetzen (Abschnitt 2) und neu messen.
 3. **Bei glatter Rate, aber trägem Gefühl:** Obsidian neu starten (lädt die GPU-Flags), und
-   für konzentriertes Schreiben `powerprofilesctl set performance`.
-4. **Erst dann** über Kernel-Updates oder einen anderen Stift nachdenken.
+   für konzentriertes Schreiben `powerprofilesctl set performance` (Abschnitt 4c).
+4. **Wenn die Störung wiederkommt:** `preempt=full` setzen (Abschnitt 4b) — das ist die
+   einzige Kernel-Schraube, die im Bugreport überhaupt Wirkung gezeigt hat.
+5. **Erst dann** über Kernel-Updates oder einen anderen Stift nachdenken.
 
 ## 6. Zurücknehmen
 
 ```bash
 rm ~/.var/app/md.obsidian.Obsidian/config/obsidian/user-flags.conf   # GPU-Flags
 powerprofilesctl set balanced                                        # Energieprofil
+sudo grubby --update-kernel=ALL --remove-args="preempt=full"         # Kernel-Vorrangstufe
 flatpak override --user --socket=wayland --socket=fallback-x11 --nosocket=x11 md.obsidian.Obsidian  # X11 → Wayland
 ```
 
