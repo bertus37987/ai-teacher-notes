@@ -103,8 +103,8 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function prepareCanvas(canvas: HTMLCanvasElement, page: HandwritingPage): CanvasRenderingContext2D | null {
-  const rect = canvas.getBoundingClientRect();
+function prepareCanvas(canvas: HTMLCanvasElement, page: HandwritingPage, gemessen?: { left: number; top: number; width: number; height: number }): CanvasRenderingContext2D | null {
+  const rect = gemessen ?? canvas.getBoundingClientRect();
   if (rect.width <= 0 || rect.height <= 0) return null;
   const ratio = window.devicePixelRatio || 1;
   const width = Math.round(rect.width * ratio), height = Math.round(rect.height * ratio);
@@ -270,6 +270,46 @@ function loadHtmlImage(dataUrl: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => { const image = new Image(); image.onload = () => resolve(image); image.onerror = () => reject(new Error("Bild konnte nicht gelesen werden")); image.src = dataUrl; });
 }
 
+/**
+ * Rückfrage vor einem zerstörerischen Schritt.
+ *
+ * `window.confirm` ist in Obsidians Renderer unbrauchbar: Der Aufruf liefert keinen
+ * verlässlichen Wert, und `if (!bestaetigt) return;` bricht dann still ab — der Knopf
+ * wirkte schlicht kaputt (Nutzerbefund 11.9.2026: „Entfernen funktioniert nicht").
+ * Dieser Dialog ist nicht blockierend, mit Tastatur bedienbar und zeigt den Text an,
+ * der bei confirm im Titel landete.
+ */
+function confirmDialog(message: string, danger = true): Promise<boolean> {
+  return new Promise((resolve) => {
+    const overlay = document.body.createDiv({ cls: "hp-confirm-overlay" });
+    const box = overlay.createDiv({ cls: "hp-confirm" });
+    box.setAttribute("role", "alertdialog");
+    box.setAttribute("aria-modal", "true");
+    const [titel, ...rest] = message.split("\n\n");
+    box.createDiv({ cls: "hp-confirm-title", text: titel });
+    const body = rest.join("\n\n").trim();
+    if (body) box.createDiv({ cls: "hp-confirm-body", text: body });
+    const actions = box.createDiv({ cls: "hp-confirm-actions" });
+    const abbrechen = actions.createEl("button", { text: "Abbrechen", attr: { "aria-label": "Abbrechen" } });
+    const ok = actions.createEl("button", { text: "Entfernen", cls: danger ? "mod-warning" : "mod-cta", attr: { "aria-label": "Bestätigen" } });
+    let erledigt = false;
+    const schliessen = (wert: boolean) => {
+      if (erledigt) return; erledigt = true;
+      document.removeEventListener("keydown", taste, true);
+      overlay.remove(); resolve(wert);
+    };
+    const taste = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); schliessen(false); }
+      else if (event.key === "Enter") { event.preventDefault(); event.stopPropagation(); schliessen(true); }
+    };
+    abbrechen.onclick = () => schliessen(false);
+    ok.onclick = () => schliessen(true);
+    overlay.addEventListener("pointerdown", (event) => { if (event.target === overlay) schliessen(false); });
+    document.addEventListener("keydown", taste, true);
+    window.setTimeout(() => ok.focus(), 0);
+  });
+}
+
 function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = filename;
   document.body.appendChild(link); link.click(); link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -319,8 +359,34 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
   private paperSelect!: HTMLSelectElement;
   private paperButtons = new Map<Paper,HTMLButtonElement>();
   private reticle!: HTMLDivElement;
+
+  /**
+   * Zwischenspeicher für die Canvas-Maße, gültig für EIN Anzeigebild.
+   *
+   * `getBoundingClientRect()` erzwingt ein Layout. Im Zeichenpfad lief es pro
+   * Stift-Ereignis — gemessen 203 Aufrufe für 200 Punkte (11.9.2026). Bei einem echten
+   * Stift mit über 100 Ereignissen je Sekunde ist das der spürbare Input-Delay.
+   * `document.timeline.currentTime` wechselt genau einmal pro Bild; innerhalb eines
+   * Bildes ist eine Neuberechnung unnötig und war die Ursache der Verzögerung.
+   */
+  private rectCache = new WeakMap<HTMLCanvasElement, { clock: number; rect: { left: number; top: number; width: number; height: number } }>();
+
+  private measuredRect(canvas: HTMLCanvasElement): { left: number; top: number; width: number; height: number } {
+    const clock = typeof document !== "undefined" && document.timeline && typeof document.timeline.currentTime === "number"
+      ? document.timeline.currentTime
+      : Date.now();
+    const treffer = this.rectCache.get(canvas);
+    if (treffer && treffer.clock === clock) return treffer.rect;
+    const messwert = canvas.getBoundingClientRect();
+    const rect = { left: messwert.left, top: messwert.top, width: messwert.width, height: messwert.height };
+    this.rectCache.set(canvas, { clock, rect });
+    return rect;
+  }
+
   // Letzte Maus-/Touchpad-Aktivität: ein nur schwebender Stift soll das Touchpad nicht überstimmen.
   private lastMouseActivityTs = Number.NEGATIVE_INFINITY;
+  /** Letzter angewandter Stiftmodus — vermeidet unnötige DOM-Schreibzugriffe. */
+  private penHoverState: boolean | null = null;
   private tool: Tool = "pen";
   private activePageId: string;
   private readonly canvases = new Map<string, HTMLCanvasElement>();
@@ -538,6 +604,9 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     // Der Zeiger darf nach dem Schließen nicht unsichtbar bleiben (Code-Audit K-01).
     this.setPenCursorActive(false);
     this.cancelPreviewFrame();
+    if (this.shapeFeedbackFrame) { cancelAnimationFrame(this.shapeFeedbackFrame); this.shapeFeedbackFrame = 0; }
+    if (this.liveInkFrame) { cancelAnimationFrame(this.liveInkFrame); this.liveInkFrame = 0; }
+    this.liveInkPending = null;
     this.touchScroll.clear();
     if (this.laserFrame !== null) cancelAnimationFrame(this.laserFrame);
     this.importAbort?.abort();
@@ -726,7 +795,10 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
       ["ellipse", "⬭", "Oval"], ["circle", "○", "Kreis"], ["triangle", "△", "Dreieck"], ["diamond", "◇", "Raute"]
     ];
     for (const [tool, icon, label] of shapeTools) {
-      const button = shapeGroup.createEl("button", { text: `${icon} ${label}`, attr: { "aria-label": label, title: `${label} ziehen` } });
+      // Symbol kommt aus toolPaths (Strich-SVG), nicht aus dem Zeichenvorrat der Schrift.
+      const button = shapeGroup.createEl("button", { text: "", attr: { "aria-label": label, title: `${label} ziehen` } });
+      button.dataset.hpIconFallback = icon;
+      applyToolIcon(button, tool);
       button.addEventListener("click", () => { this.activateTool(tool); this.optionsPanel.hidden=true; more.setAttribute("aria-expanded","false"); this.setStatus(`${label} auf der Seite ziehen`); });
       this.toolButtons.set(tool, button);
     }
@@ -880,11 +952,16 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     // Diagnose ist ein Nebenkanal: sie darf den Editor nie lahmlegen (der Test-Harness
     // benutzt einen Teil-Stub des Plugins, echte Plugins haben die Methode).
     if (typeof this.plugin.recordPenSample === "function") this.plugin.recordPenSample(event, penInput, penActive);
-    this.wrapper.toggleClass("is-pen-hover", penActive);
-    // Der Yoga-Stift bewegt den Systemzeiger nicht — der bleibt also irgendwo stehen
-    // und war beim Schreiben weiter zu sehen. Im Stiftmodus wird er deshalb global
-    // ausgeblendet (Nutzerbefund 11.9.2026: „der Cursor ist trotzdem noch da").
-    this.setPenCursorActive(penActive);
+    // Nur bei echter Änderung schreiben: ein classList-Zugriff auf <body> kann eine
+    // Style-Neuberechnung für den ganzen Baum anstoßen.
+    if (penActive !== this.penHoverState) {
+      this.penHoverState = penActive;
+      this.wrapper.toggleClass("is-pen-hover", penActive);
+      // Der Yoga-Stift bewegt den Systemzeiger nicht — der bleibt also irgendwo stehen
+      // und war beim Schreiben weiter zu sehen. Im Stiftmodus wird er deshalb global
+      // ausgeblendet (Nutzerbefund 11.9.2026: „der Cursor ist trotzdem noch da").
+      this.setPenCursorActive(penActive);
+    }
     if (!this.editing || isFingerInput(event, this.plugin.settings.penForceMode)) { this.reticle.removeClass("is-visible"); return; }
     if (this.tool !== "laser" && !penActive) { this.reticle.removeClass("is-visible"); return; }
     this.placeReticle(event);
@@ -906,9 +983,25 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     this.placeReticle(event);
   }
 
+  private reticleFrame = 0;
+  private reticleTarget: { x: number; y: number } | null = null;
+
+  /**
+   * Der Stiftpunkt wird hoechstens einmal pro Bildschirmbild geschrieben. `pointerrawupdate`
+   * und `pointermove` melden dieselbe Bewegung mehrfach je Bild; jede dieser Schreibungen
+   * stiess eine Stil-Neuberechnung an. Sichtbar bleibt es identisch — angezeigt wird ohnehin
+   * nur der letzte Stand eines Bildes.
+   */
   private placeReticle(event: PointerEvent): void {
     const sample = this.freshestSample(event);
-    this.reticle.style.transform = `translate3d(${sample.clientX}px, ${sample.clientY}px, 0) translate(-50%, -50%)`;
+    this.reticleTarget = { x: sample.clientX, y: sample.clientY };
+    if (this.reticleFrame) return;
+    this.reticleFrame = requestAnimationFrame(() => {
+      this.reticleFrame = 0;
+      const ziel = this.reticleTarget;
+      if (!ziel) return;
+      this.reticle.style.transform = `translate3d(${ziel.x}px, ${ziel.y}px, 0) translate(-50%, -50%)`;
+    });
   }
 
   /**
@@ -1015,7 +1108,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
   }
 
   private toPoint(event: PointerEvent, page: HandwritingPage, canvas: HTMLCanvasElement): InkPoint {
-    const rect = canvas.getBoundingClientRect();
+    const rect = this.measuredRect(canvas);
     // Pen-Präzision: echter Druck (Yoga-Wacom: >0 und <1; manche Treiber melden
     // 0.5 konstant), Neigung für Schattierung; Maus/Touch → neutrale 0.5.
     // isPenInput statt pointerType-Vergleich: manche Yoga-/Wacom-Treiber melden den
@@ -1181,8 +1274,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
       for (const sample of events) this.currentRawPoints.push(this.toPoint(sample, page, canvas));
       element.x2 = this.currentRawPoints[this.currentRawPoints.length - 1].x;
       element.points = this.currentRawPoints;
-      const context = this.overlays.get(pageId)?.getContext("2d");
-      if(context) drawLiveInk(context, { id: element.id, color: element.color, size: element.size, pressureSensitivity: 0, points: element.points }, firstNewPoint);
+      this.scheduleLiveInk(pageId, element, firstNewPoint);
       return;
     }
     else if (element.type === "stroke") {
@@ -1208,16 +1300,17 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
       this.lastMoveTs = event.timeStamp;
       const lastPoint = this.currentRawPoints[this.currentRawPoints.length - 1];
       if (lastPoint) this.lastMovePoint = { x: lastPoint.x, y: lastPoint.y };
-      const context = this.overlays.get(pageId)?.getContext("2d");
-      if (context) drawLiveInk(context, element, firstNewPoint);
+      this.scheduleLiveInk(pageId, element, firstNewPoint);
       return;
     }
     else if (element.type === "shape" && isShapeTool(this.tool) && this.shapeDragStart) {
       element.points = draggedShapePoints(this.tool, this.shapeDragStart, this.toPoint(events[events.length - 1], page, canvas),page);
       // Gerader Linienmodus: freihändige Zug-Richtungen rasten auf das 15°-Raster.
       if (this.tool === "line" && this.plugin.settings.lineAngleSnap) element.points = snapLineAngle(element.points);
-      const overlay=this.overlays.get(pageId); if(overlay) { const ctx=prepareCanvas(overlay,page); if(ctx) drawShape(ctx,element); }
-      this.setStatus(shapeMeasurements(element).map(m=>m.text).join(" · ")); return;
+      // Einmal pro Anzeigebild zeichnen und die Messwerte setzen — vorher lief pro
+      // Stiftpunkt eine volle Overlay-Löschung PLUS eine DOM-Schreibung der Messwerte
+      // (dieselbe Fehlerklasse wie das erzwungene Layout in toPoint).
+      this.scheduleShapeFeedback(pageId, element); return;
     }
     this.redrawPage(pageId);
   }
@@ -1331,6 +1424,9 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
   }
 
   private finishPointer(pageId: string, pointerId: number, redraw = true): void {
+    // Ausstehende Live-Tinte zuerst ausgeben: sonst fehlten die letzten Segmente,
+    // wenn das Bild nicht mehr zum Zeichnen kam (Bündelung seit 11.9.2026).
+    this.flushLiveInk();
     // Ein Radierer-Tipp ins Leere legte oben einen Undo-Schnappschuss an, ohne etwas zu
     // ändern — der Nutzer musste dann mehrfach Ctrl+Z drücken (Code-Audit M-04). Genau
     // dieser eine leere Schritt wird hier zurückgenommen.
@@ -1615,9 +1711,15 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
 
   /** Entfernt diesen Block samt Datei (Rückfrage im Plugin) und blendet den Block aus. */
   private async removeSelf(): Promise<void> {
-    const bestaetigt = window.confirm(`Diesen Handschriftblock samt Datei „${this.file.path}" entfernen?\n\nDie Datei kommt in den Papierkorb.`);
+    const bestaetigt = await confirmDialog(`Diesen Handschriftblock samt Datei „${this.file.path || this.file.name || "Handschriftdatei"}" entfernen?\n\nDie Datei kommt in den Papierkorb.`);
     if (!bestaetigt) return;
-    try { await this.plugin.removeBlockFile(this.file); } catch (error) { new Notice(`Entfernen fehlgeschlagen: ${String(error)}`); return; }
+    // Loeschen und Aufraeumen bewusst getrennt: schlaegt das Loeschen fehl (gesperrte Datei,
+    // fehlende Vault-Berechtigung), darf die Oberflaeche trotzdem nicht gesperrt
+    // zurueckbleiben — sonst laesst sich Obsidian danach nicht mehr bedienen (K-02-Klasse).
+    const pfad = this.file.path || this.file.name || "die Handschriftdatei";
+    let fehler: string | null = null;
+    try { await this.plugin.removeBlockFile(this.file); }
+    catch (error) { fehler = String(error); }
     this.wrapper.empty();
     // Die Body-Sperre muss mit: blieb `hp-editor-open` stehen, ließ sich Obsidian danach
     // nicht mehr scrollen (Code-Audit K-02). Gespeichert wird hier nichts mehr — die
@@ -1628,7 +1730,12 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     this.wrapper.removeClass("is-editing");
     this.editButton.setText("Bearbeiten");
     this.reticle.removeClass("is-visible");
-    this.wrapper.createDiv({ cls: "hp-error", text: "Handschriftblock entfernt. Die Blockmarke im Text kann jetzt gelöscht werden." });
+    this.wrapper.createDiv({
+      cls: "hp-error",
+      text: fehler
+        ? `Entfernen fehlgeschlagen (${fehler}). Die Datei ${pfad} liegt noch im Vault — bitte von Hand löschen.`
+        : "Handschriftblock entfernt. Die Blockmarke im Text kann jetzt gelöscht werden."
+    });
   }
 
   private drawSelectionOverlay(pageId: string): void {
@@ -1789,7 +1896,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     const pages = this.document.pages;
     const [page] = pages.splice(index, 1);
     pages.splice(target, 0, page);
-    this.rebuildPages(); this.rebuildPageStrip(); this.markChanged(); this.rebuildPageStrip();
+    this.rebuildPages(); this.rebuildPageStrip(); this.markChanged();
   }
 
   private duplicatePage(index: number): void {
@@ -1800,20 +1907,76 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     copy.id = crypto.randomUUID();
     this.document.pages.splice(index + 1, 0, copy);
     this.activePageId = copy.id;
-    this.rebuildPages(); this.rebuildPageStrip(); this.markChanged(); this.rebuildPageStrip();
+    this.rebuildPages(); this.rebuildPageStrip(); this.markChanged();
   }
 
-  private deletePage(index: number): void {
+  private async deletePage(index: number): Promise<void> {
     if (this.document.pages.length <= 1) { this.setStatus("Die letzte Seite kann nicht gelöscht werden"); return; }
-    if (!window.confirm(`Seite ${index + 1} wirklich löschen? ↶ stellt sie wieder her.`)) return;
+    if (!await confirmDialog(`Seite ${index + 1} wirklich löschen?\n\n↶ stellt sie wieder her.`)) return;
     this.remember();
     const [removed] = this.document.pages.splice(index, 1);
     if (this.activePageId === removed.id) this.activePageId = this.document.pages[Math.min(index, this.document.pages.length - 1)].id;
     this.clearSelection();
-    this.rebuildPages(); this.rebuildPageStrip(); this.markChanged(); this.rebuildPageStrip();
+    this.rebuildPages(); this.rebuildPageStrip(); this.markChanged();
   }
 
   /** Bricht einen wartenden Vorschau-Frame ab (Code-Audit M-02). */
+  /**
+   * Zeichnet die gezogene Form und ihre Messwerte höchstens einmal pro Anzeigebild.
+   * Beides pro Stiftpunkt auszuführen kostete ein Canvas-Löschen und eine DOM-Schreibung
+   * je Punkt — bei über 100 Punkten je Sekunde deutlich spürbar.
+   */
+  private shapeFeedbackFrame = 0;
+  private scheduleShapeFeedback(pageId: string, element: ShapeElement): void {
+    if (this.shapeFeedbackFrame) return;
+    const raf = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (cb: FrameRequestCallback) => window.setTimeout(() => cb(Date.now()), 16) as unknown as number;
+    this.shapeFeedbackFrame = raf(() => {
+      this.shapeFeedbackFrame = 0;
+      const page = this.page(pageId);
+      if (!page) return;
+      const overlay = this.overlays.get(pageId);
+      if (overlay) { const ctx = prepareCanvas(overlay, page, this.measuredRect(this.canvases.get(pageId) ?? overlay)); if (ctx) drawShape(ctx, element); }
+      this.setStatus(shapeMeasurements(element).map(m => m.text).join(" · "));
+    });
+  }
+
+  /**
+   * Live-Tinte höchstens einmal pro Anzeigebild zeichnen.
+   *
+   * Gemessen (11.9.2026): Die Kosten pro Stiftpunkt wachsen mit der Dokumentgröße —
+   * 1 Seite 0,267 ms, 19 Seiten 1,861 ms —, weil bei JEDEM pointermove synchron in das
+   * Overlay gezeichnet wurde. Ein Stift liefert über 100 Ereignisse je Sekunde; alles
+   * über der Bildrate ist verschenkte Arbeit und erzeugt die spürbare Verzögerung.
+   * Jetzt werden die neuen Punkte nur eingesammelt und einmal pro Bild gezeichnet.
+   * Der Stiftpunkt (reine transform-Änderung) folgt weiterhin sofort — das Schreiben
+   * fühlt sich dadurch direkter an, nicht träger.
+   */
+  private liveInkFrame = 0;
+  private liveInkPending: { pageId: string; elementId: string; from: number } | null = null;
+
+  private scheduleLiveInk(pageId: string, element: StrokeElement | import("./document").HighlightElement, from: number): void {
+    if (this.liveInkPending && this.liveInkPending.pageId === pageId) this.liveInkPending.from = Math.min(this.liveInkPending.from, from);
+    else this.liveInkPending = { pageId, elementId: element.id, from };
+    if (this.liveInkFrame) return;
+    const raf = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (cb: FrameRequestCallback) => window.setTimeout(() => cb(Date.now()), 16) as unknown as number;
+    this.liveInkFrame = raf(() => this.flushLiveInk());
+  }
+
+  /** Zeichnet alle aufgelaufenen Strichpunkte in einem Zug (idempotent). */
+  private flushLiveInk(): void {
+    this.liveInkFrame = 0;
+    const offen = this.liveInkPending;
+    this.liveInkPending = null;
+    if (!offen) return;
+    const page = this.page(offen.pageId);
+    const element = page?.elements.find(candidate => candidate.id === offen.elementId);
+    if (!page || !element) return;
+    const context = this.overlays.get(offen.pageId)?.getContext("2d");
+    if (!context) return;
+    if (element.type === "stroke") drawLiveInk(context, element, offen.from);
+    else if (element.type === "highlight" && element.points) drawLiveInk(context, { id: element.id, color: element.color, size: element.size, pressureSensitivity: 0, points: element.points }, offen.from);
+  }
+
   private cancelPreviewFrame(): void {
     if (this.previewFrame) { cancelAnimationFrame(this.previewFrame); this.previewFrame = 0; }
     this.pendingPreview = null;
@@ -2340,7 +2503,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
       if (controller.signal.aborted) return;
       const incoming = parseNotebookBackup(text, file.name);
       const pages = prepareBackupPages(this.document, incoming);
-      if (!window.confirm(`${pages.length} Seite${pages.length === 1 ? "" : "n"} aus "${file.name}" anhängen? Rückgängig ist möglich.`)) return;
+      if (!(await confirmDialog(`${pages.length} Seite${pages.length === 1 ? "" : "n"} aus "${file.name}" anhängen? Rückgängig ist möglich.`))) return;
       this.remember();
       this.document.pages.push(...pages);
       this.rebuildPages(); this.rebuildPageStrip(); this.markChanged();
@@ -2369,7 +2532,7 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
       if (blocks.length === 0) { new Notice("In diesem OneNote-Export wurde kein übernehmbarer Inhalt gefunden."); return; }
       const { pages: layoutPages, missingImages } = layoutOneNoteBlocks(blocks, ONE_NOTE_PAGE_HEIGHT);
       if (layoutPages.length === 0) { new Notice("OneNote-Export ist nach der Aufbereitung leer."); return; }
-      if (!window.confirm(`"${file.name}": ${layoutPages.length} Seite${layoutPages.length === 1 ? "" : "n"} mit ${blocks.length} Blöcken anhängen? Rückgängig ist möglich.`)) return;
+      if (!(await confirmDialog(`"${file.name}": ${layoutPages.length} Seite${layoutPages.length === 1 ? "" : "n"} mit ${blocks.length} Blöcken anhängen? Rückgängig ist möglich.`))) return;
       this.remember();
       const imageData = (src: string) => {
         const resolved = images.get(src) ?? (/^data:image\//i.test(src) ? src : null);
@@ -2635,6 +2798,10 @@ export default class SmoothHandwritingPlugin extends Plugin {
   private penDiagnosticTimer: number | null = null;
 
   recordPenSample(event: PointerEvent, classifiedAsPen: boolean, penModeActive: boolean): void {
+    // Nur sammeln, solange die Diagnose offen ist: `showPenDiagnostic` leert den Puffer
+    // beim Oeffnen ohnehin, vorher erfasste Proben sieht also niemand. Damit kostet das
+    // Schreiben mit dem Stift keine Objektzuweisung mehr (Performance-Runde 11.9.2026).
+    if (this.penDiagnosticTimer === null) return;
     if (this.penSamples.length >= 400) this.penSamples.shift();
     this.penSamples.push({
       pointerType: event.pointerType,
@@ -2745,7 +2912,7 @@ export default class SmoothHandwritingPlugin extends Plugin {
     }
     const pfad = treffer[1].trim();
     const datei = this.app.vault.getAbstractFileByPath(pfad);
-    const bestaetigt = window.confirm(`Handschriftblock entfernen?\n\nDie Datei „${pfad}" wird in den Papierkorb gelegt${datei ? "" : " (Datei nicht gefunden)"}.`);
+    const bestaetigt = await confirmDialog(`Handschriftblock entfernen?\n\nDie Datei „${pfad}" wird in den Papierkorb gelegt${datei ? "" : " (Datei nicht gefunden)"}.`);
     if (!bestaetigt) return;
     if (editor) {
       const start = treffer.index ?? text.indexOf(treffer[0]);

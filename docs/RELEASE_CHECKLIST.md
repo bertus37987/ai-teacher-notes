@@ -5,6 +5,8 @@ Messmethode: echtes DOM, berechnete Stile, Pixelproben — nicht nur Quelltext-L
 
 Spalten: **Funktion** · **Ergebnis** · **Beleg** · **Anmerkung**
 
+**Ergebnis: 59 PASS · 0 FAIL · 5 UNCOMPLETED**
+
 ## 1. Funktion (jede Bedienung einzeln ausgelöst)
 
 | Funktion | Ergebnis | Beleg | Anmerkung |
@@ -80,8 +82,14 @@ Spalten: **Funktion** · **Ergebnis** · **Beleg** · **Anmerkung**
 | Keine persönlichen Daten im Bestand | PASS | `data.json` **nie** committet; keine Zugangsdaten in der Historie | geprüft über gesamte Historie |
 | Keine Debug-Oberfläche | PASS | 0 Treffer für `debugger`, kein Testcode-Panel | Diagnose ist ein bewusstes Werkzeug, kein Debug-Rest |
 | `main.js` nicht im Git (nur als Release-Anhang) | PASS | per `.gitignore` | Store-konform |
-| Repo öffentlich schalten | UNCOMPLETED | Repo ist derzeit **privat** | Ein-Klick-Schritt, siehe unten |
-| Eintrag im Community-Store | UNCOMPLETED | Pull-Request an `obsidianmd/obsidian-releases` nötig | Prüfung dauert Tage bis Wochen |
+| Repo öffentlich schalten | **PASS** | `gh repo view` → `"visibility": "PUBLIC"` | erledigt 11.9.2026 |
+| Release mit Anhängen angelegt | **PASS** | `v0.25.30` mit `main.js` (444.054 B), `manifest.json`, `styles.css` | auf **ai-teacher-notes**, nicht upstream |
+| Heimpfade aus öffentlichen Dokumenten | **PASS** | `/home/willy` 0 Treffer im HEAD; ersetzt durch `<vault>`/`~` | war nach dem ersten Push kurz sichtbar, dann korrigiert |
+| Interne Notizen draußen | **PASS** | 0 Treffer für `hermes`/`hackathon`/`trailer`; Dateien bleiben lokal | aus der Versionierung entkoppelt |
+| Plugin-ID im Store frei | **PASS** | 7.500 Einträge geprüft, `smooth-handwriting` unvergeben | — |
+| Eintrag im Community-Store | UNCOMPLETED | Pull-Request an `obsidianmd/obsidian-releases` nötig | Prüfung dauert Tage bis Wochen; ID ist frei |
+| Systemaufrufe im Bundle | PASS | `flatpak`/`child_process`/`execSync`/`spawn`/`process.env`: je 0 Treffer | Ausschlusskriterium des Stores |
+| Startzeit / Speicher über 50 Seitenwechsel | UNCOMPLETED | nicht gemessen | offen |
 
 ## 5. Was für die Veröffentlichung noch zu entscheiden ist
 

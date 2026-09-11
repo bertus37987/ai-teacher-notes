@@ -53,19 +53,75 @@ console.log("notebook-transfer: detached pages and collision-safe IDs passed");
 const requireProject = createRequire(`${process.cwd()}/package.json`);
 const code = requireProject("esbuild").buildSync({ entryPoints: ["src/main.ts"], bundle: true, platform: "node", format: "cjs", external: ["obsidian"], write: false }).outputFiles[0].text;
 const notices: string[] = [];
-let confirmImport = true;
 let downloaded: Blob | undefined;
 let downloadName = "";
 const noop = () => {};
-const node = () => ({ append: noop, appendChild: noop, setAttribute: noop, showModal: noop, close: noop, remove: noop, click() { downloadName = (this as any).download; } });
+// --- Minimal-DOM: der plugin-eigene Bestätigungsdialog muss WIRKLICH laufen ---
+// Seit 0.25.31 ersetzt er window.confirm, das Obsidians Fenster nicht durchreicht
+// (der Rückgabewert kam nie an — beim Entfernen passierte deshalb sichtbar nichts).
+// Der Test darf den Dialog nicht umgehen, sonst prüft er die Rückfrage nicht mehr.
+const offeneDialoge: any[] = [];
+function fakeEl(tag = "div"): any {
+  const el: any = {
+    tagName: tag, cls: "", download: "", textContent: "", children: [] as any[], parent: null,
+    attrs: {} as Record<string, string>, style: {},
+    classList: { add: noop, remove: noop, contains: () => false },
+    createDiv: (o?: any) => anhaengen(el, "div", o),
+    createEl: (t: string, o?: any) => anhaengen(el, t, o),
+    append(c: any) { c.parent = el; el.children.push(c); return c; },
+    appendChild(c: any) { return el.append(c); },
+    setAttribute(k: string, v: string) { el.attrs[k] = v; },
+    removeAttribute(k: string) { delete el.attrs[k]; },
+    addEventListener: noop, removeEventListener: noop, focus: noop, showModal: noop, close: noop,
+    empty() { el.children = []; }, setText(text: string) { el.textContent = text; },
+    toggleClass: noop, addClass: noop, removeClass: noop,
+    remove() { if (el.parent) el.parent.children = el.parent.children.filter((c: any) => c !== el); },
+    click() { if (el.download) downloadName = el.download; if (typeof el.onclick === "function") el.onclick(); },
+    querySelector: () => null, querySelectorAll: () => []
+  };
+  return el;
+}
+function anhaengen(vater: any, tag: string, o?: any): any {
+  const el = fakeEl(tag);
+  if (o?.cls) el.cls = o.cls;
+  if (o?.text) el.textContent = o.text;
+  if (o?.attr) for (const [k, v] of Object.entries(o.attr as Record<string, string>)) el.attrs[k] = v;
+  el.parent = vater; vater.children.push(el);
+  if (String(el.cls).includes("hp-confirm-overlay")) offeneDialoge.push(el);
+  return el;
+}
+function imBaum(el: any, treffer: (e: any) => boolean): any {
+  if (treffer(el)) return el;
+  for (const kind of el.children ?? []) { const t = imBaum(kind, treffer); if (t) return t; }
+  return null;
+}
+/** Beantwortet den offenen Plugin-Dialog — genau der Weg, den auch der Nutzer geht. */
+function dialogAntworten(bestaetigen: boolean): void {
+  const overlay = offeneDialoge.shift();
+  if (!overlay) throw new Error("kein Plugin-Bestätigungsdialog offen");
+  const label = bestaetigen ? "Bestätigen" : "Abbrechen";
+  const knopf = imBaum(overlay, (e: any) => e.attrs?.["aria-label"] === label);
+  if (!knopf) throw new Error("Dialogknopf fehlt: " + label);
+  knopf.onclick();
+}
+/** Import starten und die Rückfrage beantworten, sobald sie erscheint. */
+async function importieren(e: any, file: any, bestaetigen: boolean): Promise<void> {
+  const lauf = e.importBackupFile(file);
+  await new Promise((fertig) => setTimeout(fertig, 0));
+  dialogAntworten(bestaetigen);
+  await lauf;
+}
+const fakeDocument: any = fakeEl("document");
+fakeDocument.body = fakeEl("body");
+fakeDocument.createElement = (tag: string) => fakeEl(tag);
 const moduleStub = { exports: {} as any };
 runInNewContext(code, {
   module: moduleStub, exports: moduleStub.exports,
   require: (name: string) => name === "obsidian" ? { MarkdownRenderChild: class {}, Plugin: class {}, PluginSettingTab: class {}, Notice: class { constructor(message: string) { notices.push(message); } }, Modal: class {}, Setting: class {} } : requireProject(name),
   console, structuredClone, crypto: globalThis.crypto, AbortController, DOMException, TextEncoder, Blob,
   URL: { createObjectURL(blob: Blob) { downloaded = blob; return "blob:local"; }, revokeObjectURL: noop },
-  window: { confirm: () => confirmImport, setTimeout: () => 1, clearTimeout: noop },
-  document: { createElement: node, body: node() }
+  window: { setTimeout: () => 1, clearTimeout: noop },
+  document: fakeDocument
 });
 const Editor = moduleStub.exports.InlineHandwritingEditor;
 function editor() {
@@ -80,7 +136,7 @@ async function integration() {
   const e = editor();
   assert.equal(typeof e.importBackupFile, "function", "real editor backup import is wired");
   const file = { name: backup.filename, size: backup.text.length, text: async () => backup.text };
-  await e.importBackupFile(file);
+  await importieren(e, file, true);
   assert.equal(e.document.pages.length, 2);
   assert.equal(e.history.length, 1, "whole import is one undo step");
   assert.deepEqual(e.document.pages[0], source.pages[0]);
@@ -96,10 +152,8 @@ async function integration() {
     assert.equal(read, false, guard); assert.equal(busy.history.length, 0);
     downloaded = undefined; busy.exportEditableBackup(); assert.equal(downloaded, undefined, guard);
   }
-  confirmImport = false;
-  const cancelled = editor(); await cancelled.importBackupFile(file);
+  const cancelled = editor(); await importieren(cancelled, file, false);
   assert.equal(JSON.stringify(cancelled.document), original); assert.equal(cancelled.history.length, 0);
-  confirmImport = true;
   const aborted = editor();
   await aborted.importBackupFile({ ...file, text: async () => { aborted.importAbort.abort(); return backup.text; } });
   assert.equal(JSON.stringify(aborted.document), original); assert.equal(aborted.history.length, 0); assert.equal(aborted.importing, false);

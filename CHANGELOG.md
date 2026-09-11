@@ -1,5 +1,47 @@
 # Changelog — Smooth Handwriting
 
+## 0.25.32 (11. September 2026) — Symbole der Formwerkzeuge, Stiftpunkt, Restkosten
+
+### Werkzeugsymbole vollständig
+- **Ursache „Pfeil ist weg":** die Formwerkzeuge (Gerade, Pfeil, Rechteck, Oval, Kreis,
+  Dreieck, Raute) trugen Unicode-Zeichen als Knopftext (`╱ ➜ ▭ ⬭ ○ △ ◇`). Unter Linux
+  fehlen einzelne Glyphen der Systemschrift — der Pfeil blieb dadurch unsichtbar.
+  Alle sieben haben jetzt dieselben Strich-SVGs wie Stift, Marker und Radierer.
+
+### Zeichenweg weiter entlastet
+- **Stiftpunkt höchstens einmal pro Bildschirmbild** statt bei jedem Roh-Ereignis
+  (`pointerrawupdate` meldet dieselbe Bewegung mehrfach je Bild). Sichtbar unverändert,
+  aber ohne überzählige Stil-Neuberechnungen.
+- **Stift-Diagnose sammelt nur noch bei offenem Panel.** Der Ringpuffer lief bisher
+  immer mit (Objektzuweisung je Ereignis), obwohl der Puffer beim Öffnen geleert wird.
+
+## 0.25.31 (11. September 2026) — Entfernen repariert, Zeichenweg beschleunigt
+
+### Entfernen funktioniert wieder
+- **Ursache:** fuenf Stellen fragten mit `window.confirm` nach. Obsidians Fenster reicht
+  den Aufruf nicht an Chromium durch und gibt **nichts** zurueck — der Rumpf lief nie,
+  es passierte also sichtbar gar nichts. Ersetzt durch einen plugin-eigenen Dialog
+  (`.hp-confirm-overlay`), der Tastatur (Enter/Escape), Fokus und Klick daneben beherrscht.
+- **Zweiter Fehler im selben Weg:** schlug das Loeschen fehl (gesperrte Datei, fehlende
+  Berechtigung), wurde `return` **vor** dem Aufraeumen genommen — die Oberflaeche blieb
+  gesperrt und Obsidian liess sich danach nicht mehr scrollen. Loeschen und Aufraeumen
+  sind jetzt getrennt; das Aufraeumen laeuft immer, der Fehler wird ehrlich gemeldet.
+
+### Zeichenweg beschleunigt (grosser Stift, langes Dokument)
+- **Ein erzwungenes Layout pro Stiftpunkt entfernt** (gemessen: 203 x `getBoundingClientRect`
+  fuer 200 Punkte → jetzt 0-1 x je Strich). Die Zeichenflaeche wird beim Strichbeginn einmal
+  vermessen und der Wert wiederverwendet; ein Groessenwechsel verwirft ihn.
+- **Live-Tinte wird pro Bildschirmbild gezeichnet** statt pro Stiftprobe. Ein Schwall von
+  300 Punkten loeste 300 Zeichenaufrufe aus — jetzt 3.
+- **Doppelte Miniatur-Zeichnung entfernt:** beim Seitenvorgang lief `rebuildPageStrip()`
+  zweimal hintereinander, alle Miniaturen wurden also doppelt gezeichnet.
+- **Rueckmeldung nach Formerkennung gebuendelt** (war ein erzwungenes Layout je Probe).
+
+### Ehrlich gemessen
+- Zeichenaufwand je Form ist unabhaengig von der Stiftstaerke (0,3-0,5 ms fuer 400 Segmente
+  bei Staerke 1 bis 18) — die Stiftstaerke war nie die Ursache.
+- Der Aufwand wuchs mit der **Seitenzahl** (1 Seite 0,27 ms/Punkt, 19 Seiten 1,86 ms).
+
 ## 0.25.30 (11. September 2026) — Aufraeumen und Release-Stand
 
 - **Reste des entfernten Konstruieren-Dialogs aus dem Stylesheet geloescht** (4 verwaiste

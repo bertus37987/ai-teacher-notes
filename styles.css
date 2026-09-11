@@ -744,3 +744,36 @@ body.hp-pen-active * {
 /* 2.9 Der schwarze Farbvorgabe-Punkt war auf dem dunklen Dock praktisch unsichtbar
    (Kontrast 1,06:1). Heller Ring macht ihn sichtbar, ohne die Farbe zu ändern. */
 .hp-color-swatch[aria-label="#202124"], .hp-inline .hp-tool-group .hp-rgb-toggle { box-shadow: 0 0 0 1px #ffffff59; }
+
+/* ---------------------------------------------------------------------------
+   Rückfrage-Dialog. Ersetzt `window.confirm`, das in Obsidians Renderer keinen
+   verlässlichen Wert liefert — der „Entfernen"-Knopf brach dadurch still ab
+   (Nutzerbefund 11.9.2026). Nicht blockierend, mit Tastatur bedienbar.
+   --------------------------------------------------------------------------- */
+.hp-confirm-overlay {
+  position: fixed; inset: 0; z-index: 20000;
+  display: flex; align-items: center; justify-content: center;
+  background: #0000007a; backdrop-filter: blur(2px);
+}
+.hp-confirm {
+  min-width: min(380px, calc(100vw - 32px)); max-width: min(520px, calc(100vw - 32px));
+  padding: 18px 20px 16px; border-radius: 14px;
+  background: var(--hp-ui-bg, var(--background-primary));
+  border: 1px solid var(--hp-ui-border, var(--background-modifier-border));
+  box-shadow: 0 18px 48px #00000059;
+  color: var(--hp-ui-text, var(--text-normal));
+}
+.hp-confirm-title { font-size: 15px; font-weight: 600; line-height: 1.35; }
+.hp-confirm-body { margin-top: 8px; font-size: 13px; line-height: 1.45; color: var(--hp-ui-muted, var(--text-muted)); white-space: pre-wrap; }
+.hp-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.hp-confirm-actions button {
+  min-height: 34px; padding: 7px 14px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--hp-ui-border, var(--background-modifier-border));
+  background: var(--hp-ui-raised, var(--background-secondary));
+  color: var(--hp-ui-text, var(--text-normal));
+  font-size: var(--font-ui-small, 13px);
+}
+.hp-confirm-actions button:hover { background: var(--hp-ui-hover, var(--background-modifier-hover)); }
+.hp-confirm-actions button.mod-warning { background: #8b2f2f; border-color: #a63b3b; color: #fff; }
+.hp-confirm-actions button.mod-warning:hover { background: #a13a3a; }
+.hp-confirm-actions button:focus-visible { outline: 2px solid var(--hp-ui-accent, var(--interactive-accent)); outline-offset: 2px; }

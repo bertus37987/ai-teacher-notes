@@ -176,6 +176,17 @@ export function rgbPicker(parent: HTMLElement, initial: string, update: (hex: st
  * dasselbe Strich-SVG wie die übrige Oberfläche.
  */
 const toolPaths: Record<string, string> = {
+  // Formwerkzeuge: bis 0.25.31 standen hier Unicode-Zeichen (╱ ➜ ▭ ⬭ ○ △ ◇) als
+  // Knopftext. Auf Linux fehlen einzelne Glyphen der Systemschrift — der Pfeil war
+  // dadurch unsichtbar („Pfeil ist weg", 11.9.2026). Jetzt dieselben Strich-SVGs
+  // wie bei Stift, Marker und Radierer.
+  line: '<path d="M4.8 19.2 19.2 4.8"/><circle cx="4.8" cy="19.2" r="1.4"/><circle cx="19.2" cy="4.8" r="1.4"/>',
+  arrow: '<path d="M4.8 19.2 19.2 4.8"/><path d="M12.4 4.8h6.8v6.8"/>',
+  rectangle: '<rect x="4" y="6.2" width="16" height="11.6" rx="1.3"/>',
+  ellipse: '<ellipse cx="12" cy="12" rx="8" ry="5.4"/>',
+  circle: '<circle cx="12" cy="12" r="7.2"/>',
+  triangle: '<path d="M12 4.6 20.2 19H3.8z"/>',
+  diamond: '<path d="M12 3.6 20.4 12 12 20.4 3.6 12z"/>',
   pen: '<path d="M4 20l3.6-.8L20.1 6.7a1.7 1.7 0 0 0 0-2.4l-1.4-1.4a1.7 1.7 0 0 0-2.4 0L3.8 15.4 3 20z"/><path d="M15.5 4.5l4 4"/>',
   brush: '<path d="M7 20.5c2.6 0 4.5-1.7 4.5-3.8 0-1.6-1.1-2.7-2.7-2.7S6.1 15.1 6.1 16.7c0 1.6-.9 2.3-1.9 2.7.9.7 1.9 1.1 2.8 1.1z"/><path d="M12.6 13.6 20.4 5.8a1.2 1.2 0 0 0-1.7-1.7l-7.8 7.8"/>',
   highlight: '<path d="M9.5 14.2 5.8 17.9v2.6h2.6l3.7-3.7"/><path d="M12.3 11.4 19.7 4a1.4 1.4 0 0 1 2 2l-7.4 7.4z"/>',
