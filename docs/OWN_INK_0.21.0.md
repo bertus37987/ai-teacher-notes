@@ -25,7 +25,7 @@ Die automatische Optimierung verändert ausschließlich vorhandene Stiftzüge. S
 
 ## Grenzen
 
-Wortgrenzen werden aus Abstand und Schreibpause geschätzt. Nachträglich gesetzte Punkte/Querstriche und sehr eng überlagerte Wörter bleiben schwierige Fälle. Eine große offene Kontur kann nicht sicher als O oder C gedeutet werden; deshalb wird sie nicht aggressiv geschlossen. Die Verbesserung sollte als Nächstes mit Willys realer Stifteingabe bewertet werden. Stiftlatenz auf iPad/Yoga und Linux wurde nicht mit Hardwaremessungen überprüft.
+Wortgrenzen werden aus Abstand und Schreibpause geschätzt. Nachträglich gesetzte Punkte/Querstriche und sehr eng überlagerte Wörter bleiben schwierige Fälle. Eine große offene Kontur kann nicht sicher als O oder C gedeutet werden; deshalb wird sie nicht aggressiv geschlossen. Die Verbesserung sollte als Nächstes mit der realen Stifteingabe bewertet werden. Stiftlatenz auf iPad/Yoga und Linux wurde nicht mit Hardwaremessungen überprüft.
 
 Die ältere allgemeine Whiteboard-Performance-Suite hat bekannte Budgetüberschreitungen und wurde für diesen Stand nicht erneut ausgeführt. Diese Änderung ist kein Nachweis, dass sämtliche früheren Performanceprobleme behoben sind.
 

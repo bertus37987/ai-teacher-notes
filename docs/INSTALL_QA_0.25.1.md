@@ -5,7 +5,7 @@
 ## Verifiziert
 
 - Vollständiges Backup vor Installation: `plugin-backups/smooth-handwriting-preinstall-0251-20260910-104653/` inklusive `data.json`.
-- Installiert unter `/home/willy/Dokumente/coding/.obsidian/plugins/smooth-handwriting/`.
+- Installiert unter `<vault>/.obsidian/plugins/smooth-handwriting/`.
 - `main.js`, `manifest.json`, `styles.css` per SHA256 mit Paket identisch; installierte Version 0.25.1.
 - `data.json` vor/nach Kopie und erneut nach nativem Start bitgleich mit Backup.
 - `npm run typecheck`, `npm test` (27 Suiten), `handwriting:audit` (9/9), `plugin:package`, `lab:build`, `mcp:probe`: Exit 0.
@@ -13,7 +13,7 @@
 
 ## Native Obsidian-Prüfung
 
-Obsidian lief zunächst nicht; CLI meldete fehlende Anwendung. Flatpak `md.obsidian.Obsidian` gestartet, kein Reload offener Drafts. CLI bestätigt richtigen Vault `/home/willy/Dokumente/coding`, Plugin aktiv mit Version 0.25.1.
+Obsidian lief zunächst nicht; CLI meldete fehlende Anwendung. Flatpak `md.obsidian.Obsidian` gestartet, kein Reload offener Drafts. CLI bestätigt richtigen Vault `<vault>`, Plugin aktiv mit Version 0.25.1.
 
 Isolierte neue Dateien:
 - `Handwriting/Hermes-QA-0251-1789030230436.md`
