@@ -1,11 +1,11 @@
-# Release-Prüfliste — Smooth Handwriting 0.25.29
+# Release-Prüfliste — Smooth Handwriting 0.25.32
 
 Stand: 11. September 2026 · Geprüft von: Hermes (Browser-Prüfstand `http://127.0.0.1:4173`)
 Messmethode: echtes DOM, berechnete Stile, Pixelproben — nicht nur Quelltext-Lesen.
 
 Spalten: **Funktion** · **Ergebnis** · **Beleg** · **Anmerkung**
 
-**Ergebnis: 59 PASS · 0 FAIL · 5 UNCOMPLETED**
+**Ergebnis: 68 PASS · 0 FAIL · 5 UNCOMPLETED**
 
 ## 1. Funktion (jede Bedienung einzeln ausgelöst)
 
@@ -63,9 +63,17 @@ Spalten: **Funktion** · **Ergebnis** · **Beleg** · **Anmerkung**
 
 | Kriterium | Ergebnis | Beleg | Anmerkung |
 |---|---|---|---|
-| Zeichen-Latenz | PASS | 50 Punkte in **21 ms** | keine Ruckler |
+| Zeichen-Latenz | PASS | 200 Punkte in **0,02–0,11 ms/Punkt** | nach dem Layout-Fix; vorher 0,27–1,86 ms |
+| Erzwungene Layouts je Strich | PASS | **203 → 3** für 200 Stiftpunkte | Ursache des Eingabe-Verzugs |
+| Live-Tinte je Bild statt je Probe | PASS | 300 Punkte lösen **3** Zeichenaufrufe aus (vorher 300) | — |
+| Stiftpunkt-Schreibungen | PASS | höchstens **1 pro Bildschirmbild** | vorher 1 je Roh-Ereignis |
+| Aufwand vs. Dokumentgröße | PASS | 1/7/13/19 Seiten: **0,11 / 0,03 / 0,02 / 0,02 ms** | vorher **ansteigend** 0,27 → 1,86 ms |
+| Aufwand vs. Stiftstärke | PASS | 400 Segmente in 0,3–0,5 ms bei Stärke 1 bis 18 | Stärke war **nie** die Ursache |
+| Miniaturen beim Seitenvorgang | PASS | doppelte Zeichnung entfernt | `rebuildPageStrip()` lief 2× je Vorgang |
 | Formen zeichnen | PASS | fünf Formen ohne Verzögerung | — |
 | Größe ändern (Nutzerbefund „hängt total") | PASS | Zeichnung jetzt genau 1× pro Bildschirmbild gebündelt | vorher zwei volle Zeichnungen je Stift-Ereignis |
+| **Handschriftblock entfernen** (Nutzerbefund) | **PASS** | Dialog erscheint, „Entfernen" bestätigt, Oberfläche geräumt, Scroll-Sperre gelöst | Ursache: `window.confirm` liefert in Obsidian nichts zurück |
+| **Pfeil-Symbol sichtbar** (Nutzerbefund) | **PASS** | alle **7** Formwerkzeuge mit Strich-SVG gemessen (vorher Unicode-Zeichen) | `➜` fehlte in der Systemschrift |
 | Große Tafel unter 2000 ms | UNCOMPLETED | Test überspringt sich unter Systemlast **ehrlich** selbst | Budget wurde **nicht** gesenkt; braucht unbelasteten Rechner |
 | Speicherverhalten nach Seitenwechseln | UNCOMPLETED | nicht über 50 Zyklen gemessen | offen |
 
@@ -83,8 +91,8 @@ Spalten: **Funktion** · **Ergebnis** · **Beleg** · **Anmerkung**
 | Keine Debug-Oberfläche | PASS | 0 Treffer für `debugger`, kein Testcode-Panel | Diagnose ist ein bewusstes Werkzeug, kein Debug-Rest |
 | `main.js` nicht im Git (nur als Release-Anhang) | PASS | per `.gitignore` | Store-konform |
 | Repo öffentlich schalten | **PASS** | `gh repo view` → `"visibility": "PUBLIC"` | erledigt 11.9.2026 |
-| Release mit Anhängen angelegt | **PASS** | `v0.25.30` mit `main.js` (444.054 B), `manifest.json`, `styles.css` | auf **ai-teacher-notes**, nicht upstream |
-| Heimpfade aus öffentlichen Dokumenten | **PASS** | `/home/willy` 0 Treffer im HEAD; ersetzt durch `<vault>`/`~` | war nach dem ersten Push kurz sichtbar, dann korrigiert |
+| Release mit Anhängen angelegt | **PASS** | `v0.25.32` mit `main.js`, `manifest.json`, `styles.css` | auf **ai-teacher-notes**, nicht upstream |
+| Heimpfade aus öffentlichen Dokumenten | **PASS** | persönliche Pfade durch `<vault>`/`~` ersetzt | ein Pfad war nach dem ersten Push kurz sichtbar, danach korrigiert |
 | Interne Notizen draußen | **PASS** | 0 Treffer für `hermes`/`hackathon`/`trailer`; Dateien bleiben lokal | aus der Versionierung entkoppelt |
 | Plugin-ID im Store frei | **PASS** | 7.500 Einträge geprüft, `smooth-handwriting` unvergeben | — |
 | Eintrag im Community-Store | UNCOMPLETED | Pull-Request an `obsidianmd/obsidian-releases` nötig | Prüfung dauert Tage bis Wochen; ID ist frei |
