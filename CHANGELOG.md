@@ -1,5 +1,17 @@
 # Changelog — Smooth Handwriting
 
+## 0.25.33 (11. September 2026) — Stift-Diagnose misst jetzt die Abtastrate
+
+- **Die Stift-Diagnose zeigt, was der Rechner WIRKLICH vom Stift bekommt:** Abstand
+  zwischen zwei Proben (min/median/max) und die daraus abgeleitete Rate in Hertz.
+  Damit lässt sich zum ersten Mal sauber trennen, ob die Verzögerung vom Stift
+  (Hardware) oder von der Software-Kette kommt.
+- **Klebt der Median bei ~16,7 ms (60 Hz), liegt die Bremse NICHT im Stift:** dann
+  liefert der Digitizer feiner, als Compositor/Electron durchlassen.
+- **Streuungs-Warnung:** schwankt der Probenabstand um Faktor 6 oder mehr, meldet die
+  Diagnose den bekannten Treiberfehler „tool appears to be hung in-prox" und nennt den
+  Prüfbefehl (`journalctl -k -b | grep -c idleprox_timeout`).
+
 ## 0.25.32 (11. September 2026) — Symbole der Formwerkzeuge, Stiftpunkt, Restkosten
 
 ### Werkzeugsymbole vollständig

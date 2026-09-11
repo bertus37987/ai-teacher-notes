@@ -2811,7 +2811,8 @@ export default class SmoothHandwritingPlugin extends Plugin {
       buttons: event.buttons,
       isPrimary: event.isPrimary,
       classifiedAsPen,
-      penModeActive
+      penModeActive,
+      time: event.timeStamp
     });
   }
 

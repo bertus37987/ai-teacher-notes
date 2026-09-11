@@ -78,6 +78,13 @@ export interface PenDiagnosticSample {
   isPrimary: boolean;
   classifiedAsPen: boolean;
   penModeActive: boolean;
+  /**
+   * Zeitstempel des Zeigerereignisses (ms). Macht die **Abtastrate** messbar und
+   * trennt damit Hardware-Latenz von Software-Latenz: Kommen die Proben im
+   * 8-ms-Takt (125 Hz), liefert der Stift normal und der Rest ist Software.
+   * Kleben sie bei 16,7 ms, bremst der Bildschirmtakt (Compositor/Electron).
+   */
+  time: number;
 }
 
 export function describePenDiagnostic(samples: PenDiagnosticSample[]): string {
@@ -87,7 +94,10 @@ export function describePenDiagnostic(samples: PenDiagnosticSample[]): string {
     "Das heißt: Der Stift erreicht den Editor GAR NICHT — kein Plugin-Fehler.",
     "Bekannte Ursache auf Linux: Obsidian (Electron) verliert unter einer Wayland-",
     "Sitzung die Stift-Ereignisse. Betroffen sind auch andere Zeichen-Plugins.",
-    "Abhilfe: Obsidian über X11/XWayland starten (siehe Beschreibung des Befehls)."
+    "Abhilfe: Obsidian über X11/XWayland starten (siehe Beschreibung des Befehls).",
+    "",
+    "Zweite Möglichkeit: Der Systemtreiber hängt (bekannter Wacom-Fehler).",
+    "Prüfen:  journalctl -k -b | grep -c idleprox_timeout    — hohe Zahl = Treiber zurücksetzen."
   ].join("\n");
   const types = new Map<string, number>();
   for (const sample of samples) types.set(sample.pointerType, (types.get(sample.pointerType) ?? 0) + 1);
@@ -97,8 +107,45 @@ export function describePenDiagnostic(samples: PenDiagnosticSample[]): string {
   const alsStift = samples.filter(sample => sample.classifiedAsPen).length;
   const stiftModus = samples.filter(sample => sample.penModeActive).length;
   const zahl = (wert: number) => (Math.round(wert * 1000) / 1000).toString();
+
+  // Abtastrate: Abstand zwischen zwei aufeinanderfolgenden Proben. Das ist die
+  // ehrlichste Zahl — sie zeigt, was der Rechner WIRKLICH vom Stift bekommt.
+  const zeiten = samples.map(sample => sample.time).filter(wert => Number.isFinite(wert) && wert > 0);
+  const luecken: number[] = [];
+  for (let i = 1; i < zeiten.length; i++) {
+    const abstand = zeiten[i] - zeiten[i - 1];
+    if (abstand > 0 && abstand < 250) luecken.push(abstand);
+  }
+  luecken.sort((a, b) => a - b);
+  const median = luecken.length ? luecken[Math.floor(luecken.length / 2)] : 0;
+  const rate = median > 0 ? Math.round(1000 / median) : 0;
+  const spanne = luecken.length ? `${zahl(luecken[0])} / ${zahl(median)} / ${zahl(luecken[luecken.length - 1])}` : "—";
+
+  const rat = median === 0
+    ? "Abtastrate: zu wenig Proben für eine Aussage — bitte zwei Wörter schreiben."
+    : median >= 14
+      ? `Abtastrate: ${rate} Hz (${zahl(median)} ms). Die Proben kleben am Bildschirmtakt (16,7 ms ⇒ 60 Hz).`
+        + "\n  ⇒ Der Stift liefert feiner, als der Rechner ihn durchlässt: die Bremse sitzt in der"
+        + "\n     Software-Kette (Compositor/Electron), NICHT im Stift und nicht im Plugin."
+      : median >= 6
+        ? `Abtastrate: ${rate} Hz (${zahl(median)} ms) — üblicher Wert eines Stifts im Deckglas.`
+        : `Abtastrate: ${rate} Hz (${zahl(median)} ms) — sehr hoch (dedizierter Digitizer).`;
+
+  // Streuung: gleichmäßige Abstände fühlen sich glatt an, Ausreißer ruckelig.
+  const streuung = luecken.length && luecken[0] > 0
+    ? luecken[luecken.length - 1] / luecken[0]
+    : 1;
+  const ruckeln = luecken.length > 8 && streuung >= 6
+    ? `\nStreuung: x${Math.round(streuung)} zwischen schnellster und langsamster Probe — das ruckelt.`
+      + "\n  ⇒ Typisch für den bekannten Treiberfehler „tool appears to be hung in-prox“."
+      + "\n     Prüfen mit:  journalctl -k -b | grep -c idleprox_timeout"
+      + "\n     Ist die Zahl hoch: Obsidian neu starten hilft NICHT, der Stift-Treiber muss zurückgesetzt werden."
+    : "";
+
   return [
     `Ereignisse: ${samples.length} (${typen})`,
+    rat + ruckeln,
+    `Probenabstand min/median/max: ${spanne} ms`,
     `Druck: ${zahl(Math.min(...druecke))} … ${zahl(Math.max(...druecke))}`,
     `Neigung: ${zahl(Math.min(...neigungen))} … ${zahl(Math.max(...neigungen))}`,
     `als Stift erkannt: ${alsStift} von ${samples.length}`,
