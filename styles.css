@@ -50,8 +50,6 @@ body.hp-editor-open { overflow: hidden; }
 }
 .hp-status:empty { display: none; }
 .hp-inline-header .mod-cta { margin-inline-start: auto; border-radius: 999px; padding-inline: 18px; }
-.hp-delete-button { display: none; margin-inline-start: auto; border-radius: 999px; color: var(--text-error); }
-.hp-inline.is-editing .hp-delete-button { display: block; }
 .hp-inline.is-editing .hp-inline-header .mod-cta { margin-inline-start: 0; }
 .hp-expand-button {
   position: absolute;
@@ -107,15 +105,16 @@ body.hp-editor-open { overflow: hidden; }
   flex-direction: column;
   min-height: 0;
   gap: 18px;
-  padding: 14px 14px 64px;
+  padding: 14px 14px 76px;
   overflow: hidden;
 }
 .hp-inline.is-expanded:not(.is-editing) .hp-pages { height: calc(90vh - 52px); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.hp-inline.is-strip-open:not(.is-editing) .hp-pages { padding-left: 160px; }
 .hp-inline.is-editing .hp-pages {
   position: absolute;
   inset: 52px 0 0 130px;
   padding: 22px max(24px, calc((100vw - 1260px) / 2));
-  overflow-x: hidden;
+  overflow-x: auto;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
@@ -136,6 +135,11 @@ body.hp-editor-open { overflow: hidden; }
   box-shadow: 0 7px 24px rgb(0 0 0 / 13%);
 }
 .hp-inline.is-editing .hp-page.is-active { border-color: var(--interactive-accent); }
+.hp-inline.is-editing .hp-page {
+  box-sizing: border-box;
+  width: var(--hp-page-width);
+  max-width: none;
+}
 .hp-page-label {
   position: absolute;
   z-index: 2;
@@ -159,6 +163,8 @@ body.hp-editor-open { overflow: hidden; }
 .hp-page canvas { display: block; width: 100%; height: auto; touch-action: none; }
 .hp-inline:not(.is-editing) .hp-page canvas { pointer-events: none; }
 .hp-inline.is-editing .hp-page canvas { cursor: crosshair; }
+.hp-inline.is-editing.is-pen-hover .hp-page canvas,
+.hp-inline.is-editing.is-pen-hover .hp-pdf-ink-layer { cursor: none; }
 .hp-inline.is-editing[data-tool="laser"] .hp-page canvas { cursor: none; }
 
 .hp-pen-reticle {
@@ -179,6 +185,33 @@ body.hp-editor-open { overflow: hidden; }
   pointer-events: none;
 }
 .hp-pen-reticle.is-visible { display: block; }
+/* Fadenkreuz um den Stiftpunkt — dieselbe Bildsprache wie der native Maus-Cursor
+   (Kreuz mit Mittelkreis). Nutzerbefund 10.9.2026: beim Schreiben mit dem Stift fehlte
+   das Kreuz, mit der Maus war das Anvisieren dadurch genauer. */
+.hp-pen-reticle::before,
+.hp-pen-reticle::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  background: #684691;
+  box-shadow: 0 0 0 1px #fff;
+  pointer-events: none;
+}
+.hp-pen-reticle::before {
+  width: 13px;
+  height: 1px;
+  transform: translate(-50%, -50%);
+}
+.hp-pen-reticle::after {
+  width: 1px;
+  height: 13px;
+  transform: translate(-50%, -50%);
+}
+.hp-pen-reticle.is-laser::before,
+.hp-pen-reticle.is-laser::after {
+  background: #ff1744;
+}
 .hp-pen-reticle.is-laser { box-shadow: 0 0 8px 3px #ff1744aa, 0 0 18px 5px #ff174466; }
 
 .hp-pdf-toolbar {
@@ -207,6 +240,58 @@ body.hp-editor-open { overflow: hidden; }
 .hp-pdf-toolbar button.is-active { color: var(--text-on-accent); background: var(--interactive-accent); }
 .hp-pdf-ink-layer { position: absolute; z-index: 20; inset: 0; width: 100%; height: 100%; pointer-events: none; touch-action: none; }
 .hp-pdf-ink-layer.is-drawing { pointer-events: auto; cursor: none; }
+.hp-pdf-recovery { position: absolute;
+  z-index: 101;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(560px, 84%);
+  padding: 8px 12px;
+  border: 1px solid var(--text-error);
+  border-radius: 12px;
+  background: var(--background-primary);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 18%);
+  font-size: var(--font-ui-smaller);
+}
+.hp-pdf-recovery button { width: auto; height: auto; border-radius: 8px; }
+
+/* Agenten-Vorschlag (MCP) — Obsidian-Palette, kompakt, sichtbar */
+.hp-agent-proposal {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  margin: 8px 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-secondary);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-normal);
+}
+.hp-agent-title { font-weight: 600; color: var(--interactive-accent); }
+.hp-agent-summary { color: var(--text-muted); flex: 1; min-width: 140px; }
+.hp-agent-wait { color: var(--text-faint); }
+.hp-agent-accept {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border: none;
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-weight: 600;
+}
+.hp-agent-accept:hover { background: var(--interactive-accent-hover); }
+.hp-agent-reject {
+  background: transparent;
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  border-radius: 6px;
+  padding: 4px 12px;
+}
+.hp-agent-reject:hover { color: var(--text-error); border-color: var(--text-error); }
 
 .hp-error { padding: 12px; color: var(--text-error); border: 1px solid var(--background-modifier-error); border-radius: 12px; }
 
@@ -216,20 +301,16 @@ body.hp-editor-open { overflow: hidden; }
   .hp-inline.is-editing .hp-pages { left: 100px; padding-inline: 8px; }
 }
 /* Shared, keyboard-accessible review and construction dialogs. */
-.hp-review { width: min(900px, 92vw); max-height: 90vh; overflow: auto; border: 1px solid #bed0d8; border-radius: 16px; padding: 24px; color: #20333d; background: #f8fafb; box-shadow: 0 24px 100px #0004; z-index: 100000; }
-.hp-review::backdrop { background: #142b3e99; }
+.hp-review { width: min(900px, 92vw); max-height: 90vh; overflow: auto; border: 1px solid var(--background-modifier-border); border-radius: 16px; padding: 24px; color: var(--text-normal); background: var(--background-primary); box-shadow: 0 24px 100px var(--background-modifier-box-shadow); z-index: 100000; }
+.hp-review::backdrop { background: var(--background-modifier-cover, rgba(0, 0, 0, 0.55)); }
 .hp-review h2 { margin-top: 0; }
-.hp-review input, .hp-review select, .hp-review button { font: inherit; padding: 8px; border-radius: 6px; border: 1px solid #aabfc9; background: white; color: #20333d; }
-.hp-review :focus-visible { outline: 3px solid #168b92; outline-offset: 2px; }
-.hp-review-row { display: grid; gap: 8px; padding: 16px 0; border-bottom: 1px solid #cddde3; }
-.hp-review-row img { max-width: 100%; height: 64px; object-fit: contain; object-position: left; background: white; }
+.hp-review input, .hp-review select, .hp-review button { font: inherit; padding: 8px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-normal); }
+.hp-review :focus-visible { outline: 3px solid var(--interactive-accent); outline-offset: 2px; }
+.hp-review-row { display: grid; gap: 8px; padding: 16px 0; border-bottom: 1px solid var(--background-modifier-border); }
+.hp-review-row img { max-width: 100%; height: 64px; object-fit: contain; object-position: left; background: var(--background-secondary); }
 .hp-review-row input[type=text] { width: 100%; box-sizing: border-box; font-family: "Teacher Caveat", cursive; font-size: 30px; }
-.hp-dialog-actions { display: flex; justify-content: flex-end; gap: 12px; position: sticky; bottom: -24px; padding: 16px 0; background: #f8fafb; }
+.hp-dialog-actions { display: flex; justify-content: flex-end; gap: 12px; position: sticky; bottom: -24px; padding: 16px 0; background: var(--background-primary); }
 .hp-review button:disabled { opacity: .5; }
-.hp-construction-preview { display: block; max-width: 100%; max-height: 42vh; width: auto; margin: 16px auto; border: 1px solid #b7cbd6; touch-action: none; }
-.hp-construction-controls { display: flex; flex-wrap: wrap; gap: 12px; }
-.hp-construction-controls label { display: grid; gap: 4px; }
-.hp-construction-controls input { width: 110px; }
 .hp-toolbar .hp-text-controls { display: flex; flex-direction: column; align-items: stretch; }
 .hp-toolbar .hp-text-controls button { width: 100%; height: auto; min-height: 32px; border-radius: 8px; white-space: normal; padding: 6px 4px; font-size: 12px; overflow-wrap: anywhere; }
 .hp-toolbar .hp-text-controls label { font-size: 12px; text-align: center; }
@@ -246,17 +327,20 @@ body.hp-editor-open { overflow: hidden; }
 .hp-inline .hp-tool-group button:hover { background: var(--background-secondary); }
 .hp-inline .hp-tool-group button.is-active { color: var(--text-on-accent); background: var(--interactive-accent); border-color: var(--interactive-accent); }
 .hp-inline .hp-tool-group input[type="range"] { width: 100%; grid-column: 1 / -1; }
+.hp-inline .hp-fill-row { display: flex; align-items: center; gap: 8px; grid-column: 1 / -1; }
+.hp-inline .hp-fill-row input[type="color"] { width: 42px; height: 30px; padding: 2px; border: 1px solid var(--background-modifier-border); border-radius: 6px; background: var(--background-primary); }
 .hp-inline .hp-tool-group select { width: 100%; max-width: 100%; min-width: 0; font-size: 12px; padding: 6px; grid-column: 1 / -1; }
 .hp-inline .hp-toolbar .hp-text-controls { display: flex; flex-direction: column; align-items: stretch; }
 .hp-inline .hp-text-controls label { display: flex; align-items: center; justify-content: space-between; gap: 6px; text-align: left; padding: 6px 2px; }
 .hp-inline.is-editing .hp-pages { left: calc(var(--hp-panel-width) + 24px); padding: 24px 18px 64px; }
+.hp-inline.is-editing.is-strip-open .hp-page-strip { top: auto; }
+.hp-inline.is-editing.is-strip-open .hp-pages { left: calc(144px + var(--hp-panel-width) + 24px); }
 .hp-tools-toggle { display: none; }
 .hp-inline.is-editing .hp-tools-toggle { display: block; margin-inline-start: auto; }
-.hp-inline.is-editing .hp-delete-button { display: none; }
 .hp-inline.is-editing.is-tools-hidden .hp-toolbar { display: none; }
 .hp-inline.is-editing.is-tools-hidden .hp-pages { left: 0; }
 .hp-inline button:focus-visible, .hp-inline summary:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 2px; }
-.hp-review textarea { box-sizing: border-box; display: block; width: 100%; margin: 8px 0 16px; padding: 12px; font: inherit; color: #20333d; background: white; border: 1px solid #aabfc9; border-radius: 8px; }
+.hp-review textarea { box-sizing: border-box; display: block; width: 100%; margin: 8px 0 16px; padding: 12px; font: inherit; color: var(--text-normal); background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: 8px; }
 .hp-inline.is-editing .hp-toolbar {
   top: auto;
   bottom: 18px;
@@ -268,10 +352,10 @@ body.hp-editor-open { overflow: hidden; }
   min-height: 48px;
   padding: 5px 7px;
   overflow: visible;
-  border: 1px solid rgba(45, 62, 80, 0.13);
+  border: 1px solid var(--background-modifier-border);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 10px 28px rgba(24, 42, 64, 0.12), 0 1px 2px rgba(24, 42, 64, 0.08);
+  background: var(--background-primary);
+  box-shadow: 0 10px 28px var(--background-modifier-box-shadow), 0 1px 2px var(--background-modifier-box-shadow);
   backdrop-filter: blur(18px) saturate(1.15);
 }
 .hp-toolbar > .hp-tool-section { border: 0; padding: 0; }
@@ -296,72 +380,367 @@ body.hp-editor-open { overflow: hidden; }
   border: 1px solid transparent;
   border-radius: 50%;
   background: transparent;
-  color: #334155;
+  color: var(--text-normal);
   font-size: 16px;
   font-weight: 620;
   line-height: 1;
   white-space: nowrap;
 }
-.hp-toolbar > .hp-tool-section > .hp-tool-group button:hover { background: #eff6ff; border-color: #dbeafe; }
-.hp-toolbar > .hp-tool-section > .hp-tool-group button.is-active { color: #0f6fc6; background: #e2f1ff; border-color: #c7e5ff; }
-.hp-toolbar > .hp-tool-section > .hp-tool-group button[aria-label="Text einfügen"] { margin-left: 5px; box-shadow: -1px 0 0 #dbe3ec; border-radius: 0; padding-left: 7px; }
-.hp-options-panel { position: absolute; right: 0; bottom: calc(100% + 10px); width: 260px; max-width: calc(100vw - 40px); max-height: 55vh; overflow-y: auto; padding: 12px; color: #24364a; background: rgba(255, 255, 255, 0.98); border: 1px solid rgba(45, 62, 80, 0.13); border-radius: 16px; box-shadow: 0 12px 30px rgba(24, 42, 64, 0.16); }
+.hp-toolbar > .hp-tool-section > .hp-tool-group button:hover { background: var(--background-modifier-hover); border-color: var(--background-modifier-border); }
+.hp-toolbar > .hp-tool-section > .hp-tool-group button.is-active { color: var(--text-on-accent); background: var(--interactive-accent); border-color: var(--interactive-accent); }
+.hp-toolbar > .hp-tool-section > .hp-tool-group button[aria-label="Text einfügen"] { margin-left: 5px; box-shadow: -1px 0 0 var(--background-modifier-border); border-radius: 0; padding-left: 7px; }
+.hp-options-panel { position: absolute; right: 0; bottom: calc(100% + 10px); width: 260px; max-width: calc(100vw - 40px); max-height: 55vh; overflow-y: auto; padding: 12px; color: var(--text-normal); background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 16px; box-shadow: 0 12px 30px var(--background-modifier-box-shadow); }
 .hp-options-panel[hidden], .hp-color-panel[hidden] { display: none; }
 .hp-canvas-stack { position: relative; }
 .hp-page canvas.hp-live-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+
+/* Phase 4: Auswahl, Seitenübersicht, Zoom */
+.hp-page canvas.hp-selection-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.hp-selection-actions {
+  display: flex; align-items: center; gap: 6px; padding: 4px 8px;
+  border-top: 1px solid var(--background-modifier-border);
+  flex-wrap: wrap;
+}
+.hp-selection-actions[hidden] { display: none; }
+.hp-selection-actions .hp-selection-count { font-size: var(--font-ui-smaller); color: var(--text-muted); margin-right: 4px; }
+.hp-selection-actions button {
+  background: var(--background-secondary); color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s);
+  padding: 3px 8px; font-size: var(--font-ui-small); min-height: 28px; cursor: pointer;
+}
+.hp-selection-actions button:hover { background: var(--background-modifier-hover); }
+.hp-page-strip {
+  position: absolute; z-index: 13; left: 0; top: var(--hp-header-height, 52px); bottom: 0;
+  /* Breite auf den Inhalt abgestimmt: Thumb 116 + Innenabstand 4x2 + Rahmen 2x2 = 128 px
+     plus 8 px beidseitiger Rail-Abstand = 144 px. Vorher waren es 130 px, der Thumb lief
+     um ~7 px über und die Vorschau wirkte am Rand abgeschnitten (UI-Audit 4.2 —
+     Nutzerbefund „Seitenübersicht extrem verzerrt"). */
+  width: 144px; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; gap: 10px; overflow-y: auto; overflow-x: hidden; padding: 10px 8px;
+  border-right: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+.hp-inline.is-editing .hp-page-strip, .hp-inline.is-editing .hp-page-strip[style] { top: auto; }
+.hp-inline-header { min-height: 52px; }
+.hp-page-strip[hidden] { display: none; }
+.hp-page-thumb {
+  flex: 0 0 auto; border: 2px solid transparent; border-radius: var(--radius-s);
+  background: var(--background-primary); padding: 4px; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+}
+.hp-page-thumb.is-active { border-color: var(--interactive-accent); }
+.hp-page-thumb canvas { background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 2px; }
+.hp-page-thumb-label { font-size: var(--font-ui-smaller); color: var(--text-muted); }
+.hp-page-thumb-controls { display: flex; gap: 2px; }
+.hp-page-thumb-controls button {
+  background: transparent; color: var(--text-muted); border: none;
+  border-radius: var(--radius-s); font-size: 11px; min-width: 24px; min-height: 24px; cursor: pointer;
+}
+.hp-page-thumb-controls button:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.hp-strip-toggle, .hp-zoom-controls button {
+  background: var(--background-secondary); color: var(--text-muted);
+  border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s);
+  font-size: var(--font-ui-small); min-height: 26px; min-width: 28px; cursor: pointer;
+}
+.hp-strip-toggle:hover, .hp-zoom-controls button:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.hp-view-bar {
+  position: absolute; z-index: 14; left: 0; right: 0; bottom: 0;
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+.hp-zoom-controls { display: inline-flex; align-items: center; gap: 3px; margin: 0 4px; }
+.hp-zoom-controls .hp-zoom-label { font-size: var(--font-ui-smaller); color: var(--text-muted); min-width: 44px; text-align: center; }
+.hp-view-bar button svg { width: 16px; height: 16px; display: block; }
+.hp-inline.is-editing .hp-view-bar { left: auto; right: 12px; bottom: 12px; border: 1px solid var(--background-modifier-border); border-radius: 12px; padding: 6px 10px; box-shadow: 0 4px 16px var(--background-modifier-box-shadow); }
+.hp-page { transform-origin: top center; }
 .hp-toolbar svg { width: 19px; height: 19px; }
-.hp-color-panel { position: absolute; bottom: calc(100% + 12px); right: 0; width: 270px; max-width: calc(100vw - 44px); padding: 16px; box-sizing: border-box; background: #fff; color: #334155; border: 1px solid #e2e8f0; border-radius: 18px; box-shadow: 0 12px 30px #182a4020; }
+.hp-color-panel { position: absolute; bottom: calc(100% + 12px); right: 0; width: 270px; max-width: calc(100vw - 44px); padding: 16px; box-sizing: border-box; background: var(--background-primary); color: var(--text-normal); border: 1px solid var(--background-modifier-border); border-radius: 18px; box-shadow: 0 12px 30px var(--background-modifier-box-shadow); }
 .hp-rgb-picker { display: grid; grid-template-columns: 48px 1fr; gap: 12px; margin-top: 12px; }
 .hp-rgb-picker input[type="text"] { width: 100%; min-width: 0; box-sizing: border-box; }
 .hp-rgb-picker input[type="color"] { width: 42px; height: 32px; padding: 0; border: 0; }
 .hp-inline .hp-range-control { display: grid !important; grid-template-columns: 1fr auto; grid-column: 1 / -1; gap: 6px; padding: 6px 0 !important; width: 100%; font-size: 12px; }
-.hp-range-control output { color: #64748b; font-variant-numeric: tabular-nums; }
-.hp-range-control input[type="range"] { grid-column: 1 / -1; width: 100%; margin: 0; accent-color: #3286d1; }
+.hp-range-control output { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.hp-range-control input[type="range"] { grid-column: 1 / -1; width: 100%; margin: 0; accent-color: var(--interactive-accent); }
+.hp-thickness-control { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--background-modifier-border); border-radius: 10px; background: var(--background-secondary); }
+.hp-thickness-head { display: flex; justify-content: space-between; align-items: baseline; }
+.hp-thickness-head span { font-size: var(--font-ui-smaller); color: var(--text-muted); }
+.hp-thickness-head output { font-size: var(--font-ui-smaller); font-variant-numeric: tabular-nums; color: var(--text-normal); }
+.hp-thickness-preview { width: 100%; height: 30px; border-radius: 6px; background: var(--background-primary); border: 1px solid var(--background-modifier-border); }
+.hp-thickness-preview path { transition: stroke .15s ease; }
+.hp-thickness-control input[type="range"] { width: 100%; margin: 0; accent-color: var(--interactive-accent); }
 .hp-toolbar > .hp-tool-section > .hp-tool-group .hp-rgb-toggle { position: relative; background: conic-gradient(#e45454,#efcd59,#54b76e,#4596e7,#9863d3,#e45454); width: 26px; min-width: 26px; height: 26px; min-height: 26px; margin-inline: 5px; }
 .hp-rgb-toggle::after { content: ""; position: absolute; inset: 5px; background: var(--hp-selected-color, #202124); border: 2px solid white; border-radius: 50%; }
-.hp-options-panel small { color: #64748b; font-size: 11px; line-height: 1.5; }
+.hp-options-panel small { color: var(--text-muted); font-size: 11px; line-height: 1.5; }
 .hp-color-presets { grid-column: 1 / -1; display: flex; justify-content: space-between; gap: 12px; }
-.hp-color-presets button { width: 30px; height: 30px; padding: 0; border: 3px solid white; border-radius: 50%; box-shadow: 0 0 0 1px #dce3eb; }
+.hp-color-presets button { width: 30px; height: 30px; padding: 0; border: 3px solid var(--background-primary); border-radius: 50%; box-shadow: 0 0 0 1px var(--background-modifier-border); }
 .hp-inline .hp-switch-row { display: flex; align-items: center; justify-content: space-between; grid-column: 1 / -1; gap: 16px; padding: 9px 0; font-size: 12px; }
-.hp-switch-row input { appearance: none; -webkit-appearance: none; width: 40px; min-width: 40px; height: 24px; border-radius: 20px; border: none; background: #dce1e7; position: relative; cursor: pointer; margin: 0; }
-.hp-switch-row input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: white; box-shadow: 0 1px 3px #0002; transition: transform .12s ease; }
-.hp-switch-row input:checked { background: #34c779; }
+.hp-switch-row input { appearance: none; -webkit-appearance: none; width: 40px; min-width: 40px; height: 24px; border-radius: 20px; border: none; background: var(--background-modifier-border); position: relative; cursor: pointer; margin: 0; }
+.hp-switch-row input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--background-primary); box-shadow: 0 1px 3px var(--background-modifier-box-shadow); transition: transform .12s ease; }
+.hp-switch-row input:checked { background: var(--interactive-accent); }
 .hp-switch-row input:checked::after { transform: translateX(16px); }
 .hp-options-panel { width: 290px; padding: 10px 16px; border-radius: 20px; }
-.hp-options-panel .hp-tool-section { border-bottom: 1px solid #edf0f4; padding: 4px 0; }
-.hp-options-panel .hp-tool-section summary { color: #435366; padding: 11px 2px; }
-.hp-inline .hp-options-panel .hp-tool-group button { border: 0; background: #f4f6f8; min-height: 36px; border-radius: 9px; }
-.hp-inline .hp-options-panel .hp-tool-group button.is-active { background: #e2f1ff; color: #176bad; }
+.hp-options-panel .hp-tool-section { border-bottom: 1px solid var(--background-modifier-border); padding: 4px 0; }
+.hp-options-panel .hp-tool-section summary { color: var(--text-normal); padding: 11px 2px; }
+.hp-inline .hp-options-panel .hp-tool-group button { border: 0; background: var(--background-secondary); min-height: 36px; border-radius: 9px; }
+.hp-inline .hp-options-panel .hp-tool-group button.is-active { background: var(--interactive-accent); color: var(--text-on-accent); }
 .hp-page-add { display: none; }
-.hp-inline.is-editing .hp-page-add { display: block; flex: 0 0 auto; margin: 16px auto 0; width: 44px; height: 44px; border-radius: 50%; border: 1px solid #dce5ed; background: white; color: #537083; font-size: 26px; box-shadow: 0 3px 12px #23364a0c; }
-.hp-object-editor { position: absolute; z-index: 8; border: 1px solid #5195da; box-sizing: border-box; background: white; box-shadow: 0 6px 22px #1b35531a; border-radius: 6px; }
-.hp-object-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 6px; background: #f5f8fc; border-radius: 6px 6px 0 0; }
-.hp-object-bar { position: absolute; bottom: calc(100% + 6px); left: -1px; right: -1px; background: #f5f8fc; border: 1px solid #dce5ef; border-radius: 10px; box-shadow: 0 5px 15px #23364a12; }
+.hp-inline.is-editing .hp-page-add { display: block; flex: 0 0 auto; margin: 16px auto 0; width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-muted); font-size: 26px; box-shadow: 0 3px 12px var(--background-modifier-box-shadow); }
+.hp-object-editor { position: absolute; z-index: 8; border: 1px solid var(--interactive-accent); box-sizing: border-box; background: transparent; border-radius: 0; }
+.hp-object-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; padding: 4px; }
+.hp-object-bar { position: absolute; bottom: calc(100% + 10px); left: -1px; width: max-content; max-width: min(520px, calc(100vw - 32px)); background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 12px; box-shadow: 0 3px 12px var(--background-modifier-box-shadow); }
 .hp-object-editor.controls-below .hp-object-bar { top: calc(100% + 12px); bottom: auto; }
-.hp-object-actions button, .hp-object-actions select { min-height: 32px; border: 0; border-radius: 6px; background: white; color: #334155; font-size: 12px; }
-.hp-object-actions button[aria-pressed="true"] { background: #dceeff; color: #175c9a; }
+.hp-object-actions button, .hp-object-actions select { min-width: 30px; min-height: 32px; border: 0; border-radius: 6px; background: transparent; color: var(--text-normal); font-size: 12px; }
+.hp-object-actions button:hover { background: var(--background-modifier-hover); }
+.hp-object-actions button[aria-pressed="true"] { background: var(--interactive-accent); color: var(--text-on-accent); }
 .hp-object-move, .hp-object-resize { touch-action: none; }
 .hp-object-move { cursor: move; }
-.hp-object-size { display: flex; gap: 12px; padding: 4px 8px; font-size: 11px; color: #64748b; }
+.hp-image-editor img { display: block; width: 100%; height: 100%; object-fit: fill; cursor: move; touch-action: none; user-select: none; }
+.hp-image-editor .hp-object-bar { flex-wrap: wrap; }
+.hp-image-dimensions { font-size: 11px; padding: 0 6px; color: var(--hp-ui-muted); white-space: nowrap; }
+.hp-object-size { display: flex; gap: 12px; padding: 4px 8px; font-size: 11px; color: var(--text-muted); }
 .hp-object-size input { width: 65px; margin-left: 5px; }
+.hp-object-dimensions { position: relative; font-size: 11px; }
+.hp-object-dimensions summary { cursor: pointer; padding: 8px; }
+.hp-object-dimensions .hp-object-size { position: absolute; top: 100%; right: 0; z-index: 2; padding: 8px; background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 8px; }
+.hp-object-status:not(:empty) { position: absolute; top: 100%; left: 0; padding: 6px; background: var(--background-primary); color: var(--text-error, var(--text-muted)); font-size: 12px; }
 .hp-object-content { overflow: auto; font-family: Arial, sans-serif; }
-.hp-object-content textarea { display: block; box-sizing: border-box; width: 100%; height: 100%; resize: none; border: 0; outline: none; padding: 0; margin: 0; color: inherit; font: inherit; text-align: inherit; line-height: 1.25; background: white; }
-.hp-object-resize { position: absolute; right: -10px; bottom: -10px; width: 32px; height: 32px; border-radius: 10px; border: 1px solid #b4d4f3; background: #edf6ff; color: #226aaa; cursor: nwse-resize; }
+.hp-object-content textarea { display: block; box-sizing: border-box; width: 100%; height: 100%; resize: none; border: 0; outline: none; padding: 0; margin: 0; color: inherit; font: inherit; text-align: inherit; line-height: 1.25; background: transparent; box-shadow: none; }
+.hp-object-editor .hp-object-resize { position: absolute; width: 28px; height: 28px; min-width: 28px; min-height: 28px; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.hp-object-resize::after { content: ""; position: absolute; inset: 9px; border: 1px solid var(--interactive-accent); border-radius: 2px; background: var(--background-primary); }
+.hp-resize-nw { left: -14px; top: -14px; cursor: nwse-resize; }
+.hp-resize-ne { right: -14px; top: -14px; cursor: nesw-resize; }
+.hp-resize-sw { left: -14px; bottom: -14px; cursor: nesw-resize; }
+.hp-resize-se { right: -14px; bottom: -14px; cursor: nwse-resize; }
 .hp-edit-grid { width: 100%; height: 100%; border-collapse: collapse; table-layout: fixed; }
-.hp-edit-grid td { border: 1px solid #b9c5d3; padding: 0; }
-.hp-edit-grid tr:first-child { background: #edf3fa; }
+.hp-edit-grid td { border: 1px solid var(--background-modifier-border); padding: 0; }
+.hp-edit-grid tr:first-child { background: transparent; }
 .hp-edit-grid input { box-sizing: border-box; width: 100%; min-width: 0; height: 100%; min-height: 38px; padding: 5px 8px; border: 0; background: transparent; font: inherit; color: inherit; text-align: inherit; }
 .hp-inline.is-editing[data-tool="select"] .hp-page canvas { cursor: default; }
 @media (prefers-reduced-motion: reduce) { .hp-switch-row input::after { transition: none; } }
 .hp-inline.is-editing .hp-pages { left: 0; padding-bottom: 150px; }
+/* Obsidian dark chrome. Paper and user-selected ink colors remain unchanged. */
+.hp-inline, .hp-review, .hp-pdf-toolbar {
+  --hp-ui-bg: #1e1e1e;
+  --hp-ui-raised: #262626;
+  --hp-ui-hover: #333136;
+  --hp-ui-border: #403b47;
+  --hp-ui-text: #e5e2e9;
+  --hp-ui-muted: #ada7b6;
+  --hp-ui-accent: var(--color-purple, #a88bfa);
+  --hp-ui-selected: #383044;
+  color-scheme: dark;
+  color: var(--hp-ui-text);
+}
+.hp-inline, .hp-inline.is-editing { background: var(--hp-ui-bg); border-color: var(--hp-ui-border); }
+.hp-inline-header { background: var(--hp-ui-bg); border-color: var(--hp-ui-border); }
+.hp-inline-title, .hp-page-count, .hp-inline-header button { flex-shrink: 0; white-space: nowrap; }
+/* Fehler dürfen nicht wie „4 Seiten" aussehen (2.6) und lange Meldungen nicht stumm
+   verschwinden (2.7): eigener Fehlerstil + der volle Text steht im title. */
+.hp-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hp-status.is-error { color: var(--text-error, #ff6b6b); background: #3a2426; font-weight: 600; }
+.hp-options-panel { scrollbar-width: thin; scrollbar-color: #625b6c transparent; }
+.hp-inline-header button, .hp-inline .hp-expand-button { background: var(--hp-ui-raised); color: var(--hp-ui-text); border: 1px solid var(--hp-ui-border); border-radius: 8px; min-height: 32px; padding: 4px 12px; box-shadow: none; }
+.hp-inline-header .mod-cta { background: var(--hp-ui-selected); color: #e6d9ff; border-color: #675087; }
+.hp-page-count, .hp-status { color: var(--hp-ui-muted); background: var(--hp-ui-raised); }
+.hp-inline.is-editing .hp-toolbar, .hp-pdf-toolbar,
+.hp-options-panel, .hp-color-panel, .hp-object-bar, .hp-object-dimensions .hp-object-size {
+  color: var(--hp-ui-text); background: var(--hp-ui-raised); border-color: var(--hp-ui-border); box-shadow: 0 8px 24px #0004; backdrop-filter: none;
+}
+.hp-toolbar > .hp-tool-section > .hp-tool-group button { color: var(--hp-ui-muted); }
+.hp-toolbar > .hp-tool-section > .hp-tool-group button:hover { background: var(--hp-ui-hover); border-color: var(--hp-ui-border); color: var(--hp-ui-text); }
+.hp-toolbar > .hp-tool-section > .hp-tool-group button.is-active,
+.hp-inline .hp-options-panel .hp-tool-group button.is-active,
+.hp-pdf-toolbar button.is-active, .hp-object-actions button[aria-pressed="true"] {
+  background: var(--hp-ui-selected); color: #d9c5ff; border-color: #675087;
+}
+.hp-toolbar > .hp-tool-section > .hp-tool-group button[aria-label="Text einfügen"] { box-shadow: -1px 0 0 var(--hp-ui-border); }
+.hp-options-panel .hp-tool-section, .hp-review-row { border-color: var(--hp-ui-border); }
+.hp-options-panel .hp-tool-section summary { color: var(--hp-ui-text); }
+.hp-options-panel small, .hp-range-control output, .hp-object-size, .hp-tool-label { color: var(--hp-ui-muted); }
+.hp-inline .hp-options-panel .hp-tool-group button,
+.hp-inline .hp-toolbar select, .hp-color-panel input[type="text"], .hp-color-panel select,
+.hp-object-actions select, .hp-object-size input,
+.hp-review input, .hp-review select, .hp-review button, .hp-review textarea {
+  background: var(--hp-ui-bg); color: var(--hp-ui-text); border-color: var(--hp-ui-border);
+}
+.hp-object-actions button, .hp-object-dimensions summary { color: var(--hp-ui-text); }
+.hp-object-actions button:hover { background: var(--hp-ui-hover); }
+.hp-switch-row input { background: var(--background-modifier-border); }
+.hp-switch-row input:checked { background: var(--interactive-accent); }
+/* Aus-Zustand erkennbar machen: der Track hob sich mit 1,4–1,5:1 praktisch nicht vom
+   Grund ab, ~15 Schalter wirkten deshalb „unsichtbar", solange sie aus waren. */
+.hp-switch-row input::after { background: var(--hp-ui-muted, #ada7b6); box-shadow: 0 1px 3px #0007; }
+.hp-switch-row input:checked::after { background: var(--text-on-accent, #fff); box-shadow: 0 1px 3px #0006; }
+.hp-switch-row input:hover { background: var(--hp-ui-hover, #333136); }
+.hp-switch-row input:hover::after { background: var(--hp-ui-text, #e5e2e9); }
+.hp-switch-row input:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 2px; }
+.hp-range-control input[type="range"], .hp-pdf-toolbar input[type="range"] { accent-color: var(--hp-ui-accent); }
+.hp-color-presets button { border-color: var(--hp-ui-raised); box-shadow: 0 0 0 1px #797080; }
+.hp-inline.is-editing .hp-page-add { color: var(--hp-ui-accent); background: var(--hp-ui-raised); border-color: var(--hp-ui-border); }
+.hp-inline.is-editing .hp-page.is-active, .hp-object-editor { border-color: #9670ce; }
+.hp-object-resize::after { border-color: #8051b8; background: #eee4ff; }
+/* ---------------------------------------------------------------------------
+   Textfeld-Editor: liegt auf dem WEISSEN Blatt. Obsidians Kern-Theme färbt
+   <textarea>/<input> dunkel (--background-modifier-form-field). Mit `color: inherit`
+   und einfachem `transparent` blieb auf dem weißen Canvas ein schwarzer Kasten
+   stehen (Nutzerbefund 11.9.2026: „das Textfeld hat auf weißem Canvas einen
+   schwarzen Hintergrund"). Deshalb hier explizit und mit !important, damit kein
+   Theme und kein Obsidian-Kern-CSS dazwischenfunkt.
+   --------------------------------------------------------------------------- */
+.hp-inline .hp-object-editor .hp-object-content,
+.hp-inline .hp-object-editor .hp-object-content textarea,
+.hp-inline .hp-object-editor .hp-object-content input,
+.hp-inline .hp-object-editor .hp-object-content .hp-edit-grid input {
+  background: transparent !important;
+  background-color: transparent !important;
+  color: inherit;
+  box-shadow: none !important;
+}
+.hp-inline .hp-object-editor .hp-object-content textarea { border: 0 !important; }
+.hp-inline .hp-object-editor .hp-object-content textarea::placeholder { color: #9aa0a6; opacity: 1; }
+.hp-object-content { color-scheme: light; }
+.hp-object-content input:focus-visible, .hp-object-content textarea:focus-visible { outline: 1px solid #a88bfa; outline-offset: -1px; }
+.hp-inline :is(button,summary,select,input):focus-visible, .hp-review :focus-visible { outline: 2px solid var(--hp-ui-accent); outline-offset: 2px; }
+.hp-object-status:not(:empty) { background: var(--hp-ui-raised); color: #ffb4a9; }
+.hp-review, .hp-dialog-actions { background: var(--hp-ui-bg); color: var(--hp-ui-text); border-color: var(--hp-ui-border); }
+.hp-review::backdrop { background: #100d17b3; }
+/* Native cursor: exact hotspot, small dot plus fine cross, no pointermove work. */
+.hp-paper-switch { display: flex; flex-shrink: 0; gap: 2px; padding: 3px; border: 1px solid var(--hp-ui-border); border-radius: 10px; background: var(--hp-ui-bg); }
+.hp-inline-header .hp-paper-switch button { background: transparent; border: 0; border-radius: 7px; padding: 4px 9px; min-height: 30px; font-size: 12px; color: var(--hp-ui-muted); }
+.hp-inline-header .hp-paper-switch button[aria-pressed="true"] { background: var(--hp-ui-selected); color: #e6d9ff; }
+.hp-inline:not(.is-editing) .hp-paper-switch { display: none; }
+@media (max-width: 820px) {
+  .hp-inline.is-editing .hp-inline-header { flex-wrap: wrap; }
+  .hp-inline.is-editing .hp-paper-switch { order: 2; margin-inline: auto; }
+  .hp-inline.is-editing .hp-status { display: none; }
+  .hp-inline.is-editing .hp-paper-switch button { min-height: 36px; padding-inline: 14px; }
+}
+.hp-inline.is-editing[data-tool="pen"] .hp-page canvas,
+.hp-pdf-ink-layer.is-drawing[data-tool="pen"] {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='21' height='21' viewBox='0 0 21 21'%3E%3Cpath d='M10 3v4m0 6v4M3 10h4m6 0h4' stroke='white' stroke-width='3'/%3E%3Cpath d='M10 3v4m0 6v4M3 10h4m6 0h4' stroke='%23684691' stroke-width='1'/%3E%3Ccircle cx='10' cy='10' r='2' fill='%23201b29' stroke='white' stroke-width='1'/%3E%3C/svg%3E") 10 10, crosshair;
+}
+/* Echter Stift (pointerType=pen, is-pen-hover): System-Cursor komplett aus —
+   der Stift wird durch den Live-Stiftpunkt (hp-pen-reticle) dargestellt. */
+.hp-inline.is-editing.is-pen-hover .hp-page canvas,
+.hp-inline.is-editing.is-pen-hover .hp-pdf-ink-layer {
+  cursor: none !important;
+}
+/* Der Stift bewegt den Systemzeiger nicht: er bleibt sonst irgendwo stehen und ist
+   beim Schreiben sichtbar. Solange der Stift aktiv ist, wird er deshalb überall
+   ausgeblendet — die Anzeige übernimmt der Stiftpunkt (hp-pen-reticle). */
+body.hp-pen-active,
+body.hp-pen-active * {
+  cursor: none !important;
+}
+/* Schmales Fenster (Split-View am Tablet, halbes Notizfenster): Die Knopfzeile lief
+   bei nowrap unter die Ansichtsleiste (Zoom + Seitenübersicht) — Treffer landeten
+   scheinbar im Nichts. Umbruch erlauben und das Dock über die Leiste heben. */
+@media (max-width: 700px) {
+  .hp-toolbar > .hp-tool-section > .hp-tool-group { flex-wrap: wrap; justify-content: center; }
+  .hp-inline.is-editing .hp-toolbar { bottom: 64px; border-radius: 24px; }
+}
 @media (max-width: 600px) {
   .hp-inline.is-editing { --hp-panel-width: 180px; }
   .hp-inline.is-editing .hp-toolbar { left: 50%; }
   .hp-inline.is-editing .hp-pages { left: 0; padding-inline: 8px; }
   .hp-inline.is-editing .hp-toolbar { max-width: calc(100vw - 16px); padding-inline: 4px; }
   .hp-toolbar > .hp-tool-section > .hp-tool-group { gap: 0; }
-  .hp-toolbar > .hp-tool-section > .hp-tool-group button { width: min(32px, calc((100vw - 78px) / 11)); min-width: min(32px, calc((100vw - 78px) / 11)); height: 32px; min-height: 32px; font-size: 15px; }
+  .hp-toolbar > .hp-tool-section > .hp-tool-group button { width: min(32px, calc((100vw - 38px) / var(--hp-tool-count, 14))); min-width: min(32px, calc((100vw - 38px) / var(--hp-tool-count, 14))); height: 32px; min-height: 32px; font-size: 15px; }
   .hp-toolbar > .hp-tool-section > .hp-tool-group button[aria-label="Text einfügen"] { margin-left: 3px; padding-left: 5px; }
   .hp-inline.is-editing.is-tools-hidden .hp-pages { left: 0; }
   .hp-inline-header { gap: 5px; padding-inline: 8px; }
 }
+
+/* Stift-Diagnose: Messwerte gut lesbar (Entscheidungshilfe für den Fallback). */
+.hp-pen-diag { white-space: pre-wrap; font-family: var(--font-monospace); font-size: 12px; line-height: 1.5; user-select: text; }
+
+
+/* ---------------------------------------------------------------------------
+   Lineal: Werkzeugknopf in der Leiste (Nutzerbefund 11.9.2026: der Knopf war
+   leer, weil kein SVG gesetzt war) und der Linealkörper selbst.
+   --------------------------------------------------------------------------- */
+.hp-ruler-button { display: inline-flex; align-items: center; justify-content: center; }
+.hp-ruler-button svg { width: 20px; height: 20px; }
+/* Der Lineal-Knopf muss seinen aktiven Zustand zeigen. Die frühere Regel war zu
+   schwach: `.hp-toolbar > .hp-tool-section > .hp-tool-group button` (0,3,1) setzt
+   `background: transparent` und gewann gegen `.hp-ruler-button[aria-pressed]` (0,2,0)
+   — der Knopf sah nach dem Einschalten unverändert aus (UI-Audit B2, im Browser
+   gemessen: background blieb rgba(0,0,0,0)). Mit derselben Kette plus Knopfklasse
+   ist diese Regel (0,4,1) und gewinnt. */
+.hp-toolbar > .hp-tool-section > .hp-tool-group button.hp-ruler-button[aria-pressed="true"],
+.hp-toolbar > .hp-tool-section > .hp-tool-group button.hp-ruler-button.is-active {
+  background: var(--hp-ui-selected); color: #e6d9ff; border-color: #675087;
+}
+.hp-toolbar > .hp-tool-section > .hp-tool-group button.hp-ruler-button:hover {
+  background: var(--hp-ui-hover); color: var(--hp-ui-text);
+}
+.hp-toolbar > .hp-tool-section > .hp-tool-group button.hp-ruler-button[aria-pressed="true"]:hover,
+.hp-toolbar > .hp-tool-section > .hp-tool-group button.hp-ruler-button.is-active:hover {
+  background: #453a52;
+}
+
+/* ---------------------------------------------------------------------------
+   Stift-Diagnose: schwebendes Panel, NICHT modal — ein Obsidian-Modal würde
+   die Zeichenfläche blockieren, die man zum Messen beschreiben soll.
+   --------------------------------------------------------------------------- */
+.hp-pen-diagnostic {
+  position: fixed; z-index: 12000; top: 16px; right: 16px; width: min(360px, calc(100vw - 32px));
+  padding: 12px 14px; border: 1px solid var(--hp-ui-border, var(--background-modifier-border));
+  border-radius: 12px; background: var(--hp-ui-bg, var(--background-primary));
+  color: var(--hp-ui-text, var(--text-normal)); box-shadow: 0 8px 28px rgb(0 0 0 / 35%);
+}
+.hp-pen-diagnostic { pointer-events: none; }
+.hp-pen-diag-head button { pointer-events: auto; }
+.hp-pen-diag, .hp-pen-diag-hint, .hp-pen-diag-env { pointer-events: auto; user-select: text; }
+.hp-pen-diag-head { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 650; }
+.hp-pen-diag-head button { margin-inline-start: auto; min-width: 28px; min-height: 28px; }
+.hp-pen-diag-hint { margin: 6px 0; font-size: 11px; color: var(--hp-ui-muted, var(--text-muted)); }
+.hp-pen-diag { margin: 0; white-space: pre-wrap; font-family: var(--font-monospace); font-size: 11.5px; line-height: 1.5; user-select: text; }
+.hp-pen-diag-env { margin: 8px 0 0; padding-top: 8px; border-top: 1px solid var(--background-modifier-border);
+  white-space: pre-wrap; font-size: 10.5px; line-height: 1.45; color: var(--hp-ui-muted, var(--text-muted)); }
+
+/* ---------------------------------------------------------------------------
+   Seitenübersicht: Vorschaubilder scharf und gleichmäßig (Nutzerbefund
+   11.9.2026: „extrem verzerrt"). Feste Breite + Seitenverhältnis verhindern,
+   dass das Canvas in der Flex-Spalte gestaucht wird.
+   --------------------------------------------------------------------------- */
+.hp-page-thumb canvas {
+  display: block; width: 104px; height: auto; aspect-ratio: 1200 / 1697;
+  object-fit: contain; image-rendering: auto;
+}
+/* Innenbreite = Rail-Inhalt (144 - 16 = 128 px) minus eigene Polsterung/Rahmen. */
+.hp-page-thumb { width: 116px; max-width: 100%; box-sizing: border-box; }
+.hp-page-thumb-controls button { min-width: 26px; min-height: 26px; }
+
+
+/* ===========================================================================
+   Treffergrößen für den Stift (Prüfung 11.9.2026)
+   Gemessen waren einzelne Steuerungen nur 24–28 px hoch. Mit einem Stift ist
+   das zu klein (Ziel: mindestens 32 px, besser 36 px wie in OneNote/GoodNotes).
+   Betrifft: Zoom/Seitenübersicht in der Ansichtsleiste, RGB-Farbrad,
+   Pagesteuerung in der Seitenübersicht, Auswahl-Aktionen, Objektgriffe.
+   =========================================================================== */
+.hp-strip-toggle, .hp-zoom-controls button {
+  min-height: 34px; min-width: 34px; padding: 4px 8px;
+}
+.hp-zoom-controls { gap: 6px; }
+.hp-zoom-controls .hp-zoom-label { min-width: 52px; font-size: var(--font-ui-small); }
+.hp-toolbar > .hp-tool-section > .hp-tool-group .hp-rgb-toggle {
+  width: 32px; min-width: 32px; height: 32px; min-height: 32px;
+}
+.hp-rgb-toggle::after { inset: 6px; }
+.hp-page-thumb-controls button { min-width: 32px; min-height: 32px; font-size: 13px; }
+.hp-selection-actions button { min-height: 34px; }
+.hp-object-editor .hp-object-resize { width: 32px; height: 32px; }
+.hp-pen-diag-head button { min-width: 32px; min-height: 32px; }
+.hp-ruler-button { min-width: 34px; min-height: 34px; }
+.hp-ruler-button svg { width: 22px; height: 22px; }
+
+/* 2.8 Objekt-Leiste lief bei schmalem Fenster über den linken Rand hinaus —
+   Knöpfe waren dann nicht mehr erreichbar. */
+.hp-object-bar { max-width: min(520px, calc(100vw - 24px)); overflow-x: auto; }
+
+/* 2.9 Der schwarze Farbvorgabe-Punkt war auf dem dunklen Dock praktisch unsichtbar
+   (Kontrast 1,06:1). Heller Ring macht ihn sichtbar, ohne die Farbe zu ändern. */
+.hp-color-swatch[aria-label="#202124"], .hp-inline .hp-tool-group .hp-rgb-toggle { box-shadow: 0 0 0 1px #ffffff59; }

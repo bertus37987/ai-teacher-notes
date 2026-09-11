@@ -10,6 +10,25 @@ export class PluginSettingTab {}
 export class Setting {}
 export class TFile { constructor(public path: string) {} }
 export class Notice { constructor(message: string) { const out = document.querySelector("#notices"); if (out) out.textContent = message; } }
+/** Modal-Stub für den Prüfstand: gleiche Oberfläche wie in Obsidian (titleEl/contentEl/open/onClose). */
+export class Modal {
+  titleEl: HTMLElement;
+  contentEl: HTMLElement;
+  modalEl: HTMLElement;
+  onClose?: () => void;
+  private host?: HTMLElement;
+  constructor(_app: unknown) {
+    this.modalEl = document.createElement("div");
+    this.modalEl.className = "modal";
+    this.titleEl = document.createElement("div");
+    this.titleEl.className = "modal-title";
+    this.contentEl = document.createElement("div");
+    this.contentEl.className = "modal-content";
+    this.modalEl.append(this.titleEl, this.contentEl);
+  }
+  open(): void { this.host = document.createElement("div"); this.host.className = "modal-container"; this.host.append(this.modalEl); document.body.append(this.host); }
+  close(): void { this.host?.remove(); this.host = undefined; this.onClose?.(); }
+}
 export function normalizePath(path: string): string { return path; }
 export async function loadPdfJs() {
   const pdfjs = await import("pdfjs-dist");

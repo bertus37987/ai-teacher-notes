@@ -1,6 +1,7 @@
 import { InkLine } from "./htr-core";
 
 export type AssetUrl = (name: string) => string;
+export interface RecognitionResult { text: string; confidence: number; }
 
 /** Isolate Electron's process shim only inside our dedicated inference worker. */
 export function browserWorkerSource(source: string): string {
@@ -33,7 +34,7 @@ export function rasterizeLine(line: InkLine): { pixels: Float32Array; width: num
 export class LocalHandwritingRecognizer {
   private worker?: Worker;
   private sequence = 0;
-  private pending = new Map<number, { resolve: (text: string) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
+  private pending = new Map<number, { resolve: (result: RecognitionResult) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   constructor(private asset: AssetUrl) {}
   private async start(): Promise<void> {
     if (this.worker) return;
@@ -47,15 +48,24 @@ export class LocalHandwritingRecognizer {
     this.worker.onmessage = event => {
       const entry = this.pending.get(event.data.id); if (!entry) return;
       clearTimeout(entry.timer); this.pending.delete(event.data.id);
-      if (event.data.error) entry.reject(new Error(event.data.error)); else entry.resolve(event.data.text);
+      if (event.data.error) entry.reject(new Error(event.data.error)); else entry.resolve({text:event.data.text,confidence:event.data.confidence ?? 0});
     };
     this.worker.onerror = () => this.dispose("Lokale Erkennung konnte nicht gestartet werden");
   }
   async recognize(line: InkLine): Promise<string> {
+    return (await this.recognizeDetailed(line)).text;
+  }
+  async recognizeDetailed(line: InkLine): Promise<RecognitionResult> {
     await this.start();
     const { pixels, width } = rasterizeLine(line); const id = ++this.sequence;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => this.dispose("Die Erkennung hat zu lange gedauert. Original bleibt erhalten."), 90_000);
+      const timer = setTimeout(() => {
+        // Nur DIESE Zeile zurückweisen. Vorher beendete ein einziges Zeitlimit den Worker und
+        // verwarf damit ALLE wartenden Zeilen (Code-Audit N-06) — eine langsame Zeile riss
+        // also die ganze Erkennung ab.
+        const entry = this.pending.get(id);
+        if (entry) { this.pending.delete(id); entry.reject(new Error("Die Erkennung hat zu lange gedauert. Original bleibt erhalten.")); }
+      }, 90_000);
       this.pending.set(id, { resolve, reject, timer });
       this.worker!.postMessage({ id, pixels, width, assets: {
         model: this.asset("model.onnx"), config: this.asset("config.json"),

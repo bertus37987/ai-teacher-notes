@@ -10,10 +10,10 @@ Ein mehrseitiges Heft mit einer geduldigen visuellen Lehrkraft. Mensch und Agent
 
 1. Vorhandenen eigenen Canvas und Obsidian-Adapter weiterverwenden.
 2. Handschriftpipeline: Rohstriche behalten, Zeilen segmentieren, offline HTR ausführen, erkannte Wörter korrigierbar anzeigen, lesbar rekonstruieren, Original wiederherstellen.
-3. Ein klarer Modus für Handschrift verhindert die automatische Umwandlung von Buchstaben in geometrische Formen.
+3. Ein klarer Modus für Handschrift verhindert die automatische Umwandlung vo; Winkel und Länge numen Buchstaben in geometrische Formen.
 4. Modell lokal bündeln; Inferenz im Worker nach Pen-up. Keine Notizen an einen Cloudservice senden.
 5. Rekonstruktion zunächst in einer gebündelten Handschrift-Schrift. Individuelle persönliche Schriftrekonstruktion ist ein eigener späterer Modellschritt; Ausrichtung allein ist keine semantische Verbesserung.
-6. Geodreieck: verschieben, drehen, Gradskala, entlang der Kante zeichnen; Winkel und Länge numerisch eingeben.
+6. Geodreieck: verschieben, drehen, Gradskala, entlang der Kante zeichnenrisch eingeben.
 7. Zirkel: Mittelpunkt setzen, Radius einstellen/ziehen, Kreis und Kreisbogen mit exaktem Radius erstellen.
 8. Papierformat ändern, Undo, Save/Reload, Mehrseitenexport und Modellfehler testen.
 9. Installierbares ZIP mit main.js, manifest.json, styles.css, Modell, Worker, Runtime und Lizenzen bauen.

@@ -1,9 +1,10 @@
 {
   "id": "smooth-handwriting",
   "name": "Smooth Handwriting",
-  "version": "0.18.0",
+  "version": "0.25.30",
   "minAppVersion": "1.5.0",
-  "description": "Persönlich ausgerichtete Handschrift, automatische Formen, Vollbild-Editor und PDF-Tinte direkt in Obsidian.",
+  "description": "Handschrift-Editor für Obsidian: Schreiben mit Stift, automatische Formen, Lineal, PDF-Tinte. — Handwriting editor for Obsidian: pen input, automatic shapes, ruler, PDF ink.",
   "author": "Willy",
-  "isDesktopOnly": false
+  "isDesktopOnly": false,
+  "authorUrl": "https://github.com/bertus37987"
 }

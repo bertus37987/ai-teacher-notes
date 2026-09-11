@@ -4,10 +4,11 @@ import type { ShapeElement } from "./document";
 export type OptimizedShape = "line" | "arrow" | "ellipse" | "rectangle" | "polygon" | null;
 export type ShapeDragTool = "line" | "arrow" | "ellipse" | "circle" | "rectangle" | "triangle" | "diamond";
 
-export function draggedShapePoints(tool: ShapeDragTool, start: InkPoint, end: InkPoint): InkPoint[] {
+export function draggedShapePoints(tool: ShapeDragTool, start: InkPoint, end: InkPoint, page?:{width:number;height:number}): InkPoint[] {
   if (tool === "line" || tool === "arrow" || tool === "ellipse" || tool === "rectangle") return [{ ...start }, { ...end }];
   if (tool === "circle") {
-    const side = Math.max(Math.abs(end.x - start.x), Math.abs(end.y - start.y));
+    let side = Math.max(Math.abs(end.x - start.x), Math.abs(end.y - start.y));
+    if(page) side=Math.max(0,Math.min(side,end.x>=start.x ? page.width-start.x : start.x,end.y>=start.y ? page.height-start.y : start.y));
     return [{ ...start }, { ...end, x: start.x + Math.sign(end.x - start.x || 1) * side, y: start.y + Math.sign(end.y - start.y || 1) * side }];
   }
   const left = Math.min(start.x, end.x); const right = Math.max(start.x, end.x);
@@ -141,13 +142,18 @@ function optimizeArrow(stroke: InkStroke): InkStroke | null {
   return { ...stroke, points: [{ ...start }, { ...tip }] };
 }
 
-function optimizeClosedShape(stroke: InkStroke, toleranceScale = 1): { stroke: InkStroke; kind: OptimizedShape } | null {
-  if (stroke.points.length < 10) return null;
+function optimizeClosedShape(stroke: InkStroke, toleranceScale = 1, force = false, preferCircle = false): { stroke: InkStroke; kind: OptimizedShape } | null {
+  if (stroke.points.length < (force ? 8 : 10)) return null;
   const box = bounds(stroke.points);
   const width = box.maxX - box.minX;
   const height = box.maxY - box.minY;
   const diagonal = Math.hypot(width, height);
-  if (width < 55 || height < 55 || diagonal < 90 || distance(stroke.points[0], stroke.points[stroke.points.length - 1]) > diagonal * 0.16 * toleranceScale) return null;
+  // Halten (force): handschriftgroße Ovale (ab ~16 px) zulassen und größere
+  // End-Lücke tolerieren — sonst scheitert der Hold-Snap im Schulalltag.
+  const minSize = force ? 16 : 40;
+  const minDiagonal = force ? 26 : 60;
+  const closureLimit = diagonal * (force ? 0.45 : 0.22) * toleranceScale;
+  if (width < minSize || height < minSize || diagonal < minDiagonal || distance(stroke.points[0], stroke.points[stroke.points.length - 1]) > closureLimit) return null;
 
   const edgeError = stroke.points.reduce((sum, point) => sum + Math.min(
     Math.abs(point.x - box.minX),
@@ -163,8 +169,19 @@ function optimizeClosedShape(stroke: InkStroke, toleranceScale = 1): { stroke: I
     (point.y - centerY) / (height / 2)
   ));
   const radialError = radii.reduce((sum, radius) => sum + Math.abs(radius - 1), 0) / radii.length;
+  // Require all four box corners: a right triangle can occupy three and
+  // still pass the average edge-error threshold, especially when held.
+  // Ellipses additionally need a balanced radius profile.
+  const cornerTolerance = Math.max(14, diagonal * 0.18);
+  const cornerCount = [
+    { x: box.minX, y: box.minY, pressure: 0 },
+    { x: box.maxX, y: box.minY, pressure: 0 },
+    { x: box.maxX, y: box.maxY, pressure: 0 },
+    { x: box.minX, y: box.maxY, pressure: 0 }
+  ].reduce((count, corner) => count + (stroke.points.some((point) => distance(corner, point) <= cornerTolerance) ? 1 : 0), 0);
+  const radiusRatio = Math.min(...radii) / Math.max(...radii);
 
-  if (edgeError < 0.06 * toleranceScale && radialError > 0.09) {
+  if (edgeError < (force ? 0.09 : 0.07) * toleranceScale && radialError > (force ? 0.12 : 0.09) && cornerCount === 4) {
     const pressure = stroke.points.reduce((sum, point) => sum + point.pressure, 0) / stroke.points.length;
     return {
       kind: "rectangle",
@@ -181,7 +198,13 @@ function optimizeClosedShape(stroke: InkStroke, toleranceScale = 1): { stroke: I
     };
   }
 
-  if (radialError <= 0.2 * toleranceScale) {
+  if (radialError <= (force ? 0.38 : 0.24) * toleranceScale && radiusRatio >= (force ? 0.32 : 0.5)) {
+    // Kreis-Anteil: fast runde Zeichnungen werden im Normalfall bereits perfekt
+    // rund (Apple-Notes-Verhalten); Halten/100 % erlauben großzügigeres Einrunden.
+    const aspect = Math.min(width, height) / Math.max(width, height);
+    const circle = preferCircle ? aspect >= (force ? 0.66 : 0.72) : aspect >= 0.88;
+    const radiusX = circle ? (width + height) / 4 : width / 2;
+    const radiusY = circle ? radiusX : height / 2;
     const first = stroke.points[0];
     const startAngle = Math.atan2((first.y - centerY) / height, (first.x - centerX) / width);
     let signedArea = 0;
@@ -194,8 +217,8 @@ function optimizeClosedShape(stroke: InkStroke, toleranceScale = 1): { stroke: I
     for (let step = 0; step <= 48; step += 1) {
       const angle = startAngle + direction * step / 48 * Math.PI * 2;
       points.push({
-        x: centerX + Math.cos(angle) * width / 2,
-        y: centerY + Math.sin(angle) * height / 2,
+        x: centerX + Math.cos(angle) * radiusX,
+        y: centerY + Math.sin(angle) * radiusY,
         pressure
       });
     }
@@ -205,13 +228,46 @@ function optimizeClosedShape(stroke: InkStroke, toleranceScale = 1): { stroke: I
   return polygon ? { kind: "polygon", stroke: polygon } : null;
 }
 
-export function optimizeShape(stroke: InkStroke, strength = .7): { stroke: InkStroke; kind: OptimizedShape } {
+export function optimizeShape(stroke: InkStroke, strength = .7, force = false): { stroke: InkStroke; kind: OptimizedShape } {
   if (strength <= 0) return { stroke, kind: null };
-  const toleranceScale = .5 + Math.min(1, strength) / 1.4;
+  let toleranceScale = .5 + Math.min(1, strength) / 1.4;
+  if (force) toleranceScale += .35;
   const arrow = optimizeArrow(stroke);
   if (arrow) return { stroke: arrow, kind: "arrow" };
   const line = optimizeLine(stroke, toleranceScale);
   if (line) return { stroke: line, kind: "line" };
-  const closed = optimizeClosedShape(stroke, toleranceScale);
+  const closed = optimizeClosedShape(stroke, toleranceScale, force, force || strength >= 1);
   return closed ?? { stroke, kind: null };
+}
+
+/** Endpunkte eines Strichs an nahe Zielpunkte (andere Elemente) attrahieren. */
+export function snapStrokeEndpoints(stroke: InkStroke, targets: { x: number; y: number }[], radius = 14): InkStroke {
+  if (targets.length === 0 || stroke.points.length < 2) return stroke;
+  const snap = (point: InkPoint): InkPoint => {
+    let best: { x: number; y: number } | null = null;
+    let bestDistance = radius;
+    for (const target of targets) {
+      const candidate = Math.hypot(target.x - point.x, target.y - point.y);
+      if (candidate < bestDistance) { bestDistance = candidate; best = target; }
+    }
+    return best ? { ...point, x: best.x, y: best.y } : point;
+  };
+  const first = snap(stroke.points[0]);
+  const last = snap(stroke.points[stroke.points.length - 1]);
+  return { ...stroke, points: [first, ...stroke.points.slice(1, -1), last] };
+}
+
+/** Richtung einer Geraden auf das nächste 15°-Raster einrasten (Länge bleibt). */
+export function snapLineAngle(points: InkPoint[], stepDegrees = 15): InkPoint[] {
+  if (points.length < 2) return points;
+  const first = points[0];
+  const last = points[points.length - 1];
+  const dx = last.x - first.x;
+  const dy = last.y - first.y;
+  const length = Math.hypot(dx, dy);
+  if (length < 24) return points;
+  const angle = Math.atan2(dy, dx);
+  const step = stepDegrees * Math.PI / 180;
+  const snappedAngle = Math.round(angle / step) * step;
+  return [...points.slice(0, -1), { ...last, x: first.x + Math.cos(snappedAngle) * length, y: first.y + Math.sin(snappedAngle) * length }];
 }

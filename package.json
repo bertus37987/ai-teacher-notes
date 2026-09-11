@@ -6,8 +6,12 @@
   "scripts": {
     "build": "node esbuild.mjs production",
     "plugin:package": "npm run build && node scripts/build-plugin.mjs",
+    "mcp:build": "node scripts/build-companion.mjs",
+    "mcp:bridge": "npm run mcp:build && node companion-dist/mcp-bridge.mjs",
+    "mcp:probe": "npm run mcp:build && node scripts/probe-bridge.mjs",
     "dev": "node esbuild.mjs",
     "typecheck": "tsc --noEmit",
+    "handwriting:audit": "node scripts/audit-handwriting.mjs",
     "test": "node scripts/test.mjs",
     "web:build": "node web-esbuild.mjs --production",
     "web:dev": "node web-esbuild.mjs",

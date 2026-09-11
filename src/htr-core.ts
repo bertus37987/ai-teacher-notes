@@ -48,12 +48,28 @@ export function decodeCtc(logits: ArrayLike<number>, dims: readonly number[], al
   return text.trim();
 }
 
+export function decodeCtcConfidence(logits: ArrayLike<number>, dims: readonly number[], alphabet: string): { text: string; confidence: number } {
+  const text=decodeCtc(logits,dims,alphabet);
+  let previous=-1, total=0, count=0;
+  for(let t=0;t<dims[1];t++) {
+    const offset=t*dims[2]; let best=0;
+    for(let c=1;c<dims[2];c++) if(logits[offset+c]>logits[offset+best]) best=c;
+    if(best!==0 && best!==previous) {
+      const peak=logits[offset+best]; let denominator=0;
+      for(let c=0;c<dims[2];c++) denominator+=Math.exp(logits[offset+c]-peak);
+      total+=Math.log(1/denominator); count++;
+    }
+    previous=best;
+  }
+  return {text,confidence:count ? Math.exp(total/count) : 0};
+}
+
 export function reconstructLine(page: HandwritingPage, line: InkLine, text: string, sizeScale = 1, measure?: (text: string, fontSize: number) => number, targetFontSize?: number): TextElement {
   if (!text.trim() || text.length > 500) throw new Error("Bitte 1–500 Zeichen pro Zeile bestätigen");
   if (!line.strokes.every(s => page.elements.some(e => e.id === s.id && JSON.stringify(e) === JSON.stringify(s)))) throw new Error("Die Handschrift hat sich geändert. Bitte neu erkennen.");
   const originals = structuredClone(line.strokes);
   if (!Number.isFinite(sizeScale) || sizeScale < 0.75 || sizeScale > 1.75) throw new Error("Ungültige Schriftgröße");
-  if (targetFontSize !== undefined && (!Number.isFinite(targetFontSize) || targetFontSize < 16 || targetFontSize > 96)) throw new Error("Schriftgröße muss zwischen 16 und 96 px liegen");
+  if (targetFontSize !== undefined && (!Number.isFinite(targetFontSize) || targetFontSize < 16 || targetFontSize > 256)) throw new Error("Schriftgröße muss zwischen 16 und 256 px liegen");
   const fontSize = targetFontSize ?? Math.max(22, (line.maxY - line.minY) * 1.35) * sizeScale;
   const width = page.width - line.minX - 16;
   const fits = measure ?? ((value: string, size: number) => Array.from(value).length * size * 0.55);

@@ -21,7 +21,7 @@ export async function reviewHandwriting(page: HandwritingPage, recognizer: Local
   const entries = lines.map((line, i) => {
     const row = document.createElement("div"); row.className = "hp-review-row";
     const label = document.createElement("label"); label.textContent = `Zeile ${i + 1} übernehmen`;
-    const check = document.createElement("input"); check.type = "checkbox"; check.checked = false; label.prepend(check);
+    const check = document.createElement("input"); check.type = "checkbox"; check.checked = true; label.prepend(check);
     const preview = document.createElement("img"); preview.alt = `Originalhandschrift Zeile ${i + 1}`;
     try { preview.src = rasterizeLine(line).preview; } catch { /* Error appears during inference, manual input remains available. */ }
     const input = document.createElement("input"); input.type = "text"; input.maxLength = 500; input.setAttribute("aria-label", `Erkannter Text Zeile ${i + 1}`);
@@ -78,7 +78,18 @@ export async function reviewHandwriting(page: HandwritingPage, recognizer: Local
         catch (error) { if (closed) return; entry.hint.textContent = `Keine sichere Erkennung: ${error instanceof Error ? error.message : String(error)} Du kannst die Zeile selbst eingeben.`; }
         entry.input.placeholder = "Text prüfen oder selbst eingeben";
       }
-      if (!closed) { status.textContent = "Vorschau fertig. Noch wurde kein Strich ersetzt."; apply.disabled = false; join.disabled = false; }
+      if (!closed) {
+        status.textContent = "Vorschau fertig. Noch wurde kein Strich ersetzt.";
+        apply.disabled = false; join.disabled = false;
+        // Nutzerverbesserung 10.9.2026: Ergebnis direkt auf die Seite — wenn
+        // alle Zeilen erkannt wurden und nichts abgewählt wurde, automatisch
+        // übernehmen. Der Nutzer kann vorher im Dialog korrigieren; Fehler
+        // (zu wenig Platz) lassen den Dialog offen.
+        if (entries.every(e => e.check.checked) && entries.every(e => e.input.value.trim())) {
+          try { apply.click(); }
+          catch { /* apply-Handler zeigt den Fehler im Dialog-Status; Nutzer entscheidet. */ }
+        }
+      }
     })();
   });
 }

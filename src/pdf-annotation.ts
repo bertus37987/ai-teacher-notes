@@ -1,15 +1,11 @@
-import { App, EventRef, TFile, normalizePath } from "obsidian";
-import { PageElement, ShapeElement, StrokeElement, mergeClosedLineShapes } from "./document";
+import { App, EventRef, Notice, TFile, normalizePath } from "obsidian";
+import { ShapeElement, StrokeElement, mergeClosedLineShapes } from "./document";
 import { drawInkStroke, drawShape } from "./rendering";
 import type { SmoothHandwritingSettings } from "./main";
 import { optimizeShape } from "./shapes";
 import { InkPoint, InkStroke, cleanCapturedStroke, strokeTouches } from "./strokes";
-
-interface PdfInkDocument {
-  version: 1;
-  pdfPath: string;
-  pages: Record<string, PageElement[]>;
-}
+import { PdfSidecarGuard } from "./pdf-sidecar";
+import type { PdfInkDocument } from "./pdf-sidecar";
 
 type PdfTool = "off" | "pen" | "eraser" | "laser";
 
@@ -46,6 +42,9 @@ export class PdfAnnotationManager {
   private toolbar: HTMLElement | null = null;
   private reticle: HTMLElement | null = null;
   private refreshEpoch = 0;
+  private readonly sidecar = new PdfSidecarGuard();
+  private pdfToolButtons: HTMLButtonElement[] = [];
+  private recoveryBanner: HTMLElement | null = null;
 
   constructor(
     private readonly app: App,
@@ -81,6 +80,7 @@ export class PdfAnnotationManager {
     this.document = loaded;
     this.buildToolbar(root);
     this.attachPages();
+    this.refreshRecoveryUI();
     this.observer = new MutationObserver(() => this.attachPages());
     this.observer.observe(root, { childList: true, subtree: true });
   }
@@ -110,14 +110,16 @@ export class PdfAnnotationManager {
   }
 
   private buildToolbar(root: HTMLElement): void {
-    root.addClass("hp-pdf-root");
-    const toolbar = root.createDiv("hp-pdf-toolbar");
-    toolbar.createSpan({ cls: "hp-pdf-title", text: "Smooth Ink" });
-    const toolGroup = toolbar.createDiv("hp-tool-group");
-    toolGroup.createSpan({ cls: "hp-tool-label", text: "Werkzeug" });
-    for (const [tool, icon, title] of [["pen", "✎", "Auf PDF schreiben"], ["eraser", "⌫", "PDF-Tinte radieren"], ["laser", "●", "Temporärer Präsentationsstift"], ["off", "↟", "PDF-Navigation"]] as Array<[PdfTool, string, string]>) {
-      const button = toolGroup.createEl("button", { text: icon, attr: { title, "aria-label": title } });
-      if (tool === "off") button.addClass("is-active");
+      root.addClass("hp-pdf-root");
+      this.pdfToolButtons = [];
+      const toolbar = root.createDiv("hp-pdf-toolbar");
+      toolbar.createSpan({ cls: "hp-pdf-title", text: "Smooth Ink" });
+      const toolGroup = toolbar.createDiv("hp-tool-group");
+      toolGroup.createSpan({ cls: "hp-tool-label", text: "Werkzeug" });
+      for (const [tool, icon, title] of [["pen", "✎", "Auf PDF schreiben"], ["eraser", "⌫", "PDF-Tinte radieren"], ["laser", "●", "Temporärer Präsentationsstift"], ["off", "↟", "PDF-Navigation"]] as Array<[PdfTool, string, string]>) {
+        const button = toolGroup.createEl("button", { text: icon, attr: { title, "aria-label": title } });
+        this.pdfToolButtons.push(button);
+        if (tool === "off") button.addClass("is-active");
       button.addEventListener("click", () => {
         this.tool = tool;
         toolbar.querySelectorAll("button").forEach((candidate) => candidate.removeClass("is-active"));
@@ -186,11 +188,13 @@ export class PdfAnnotationManager {
   }
 
   private updateCanvasMode(): void {
-    for (const canvas of this.canvases.values()) canvas.toggleClass("is-drawing", this.tool !== "off");
+    this.reticle?.removeClass("is-visible");
+    for (const canvas of this.canvases.values()) { canvas.toggleClass("is-drawing", this.tool !== "off"); canvas.dataset.tool=this.tool; }
   }
 
   private moveReticle(event: PointerEvent): void {
-    if (!this.reticle || this.tool === "off" || event.pointerType === "touch") return;
+    if (!this.reticle) return;
+    if (this.tool === "off" || this.tool === "pen" || event.pointerType === "touch") { this.reticle.removeClass("is-visible"); return; }
     this.reticle.style.left = `${event.clientX}px`;
     this.reticle.style.top = `${event.clientY}px`;
     this.reticle.style.setProperty("--hp-reticle-color", this.tool === "laser" ? "#ff1744" : this.settings().penColor);
@@ -201,7 +205,7 @@ export class PdfAnnotationManager {
 
   private pointerDown(event: PointerEvent, pageNumber: string, canvas: HTMLCanvasElement): void {
     this.moveReticle(event);
-    if (this.tool === "off" || event.pointerType === "touch" || event.button !== 0 || !this.document) return;
+    if (this.tool === "off" || event.pointerType === "touch" || event.button !== 0 || !this.document || !this.sidecar.writable) return;
     event.preventDefault();
     canvas.setPointerCapture(event.pointerId);
     this.currentPage = pageNumber;
@@ -243,11 +247,11 @@ export class PdfAnnotationManager {
       this.currentStroke.points = cleanCapturedStroke(this.currentRawPoints, true);
       const optimized = this.settings().shapeOptimization ? optimizeShape(this.currentStroke) : { stroke: this.currentStroke, kind: null };
       if (index >= 0 && optimized.kind) {
-        const shape: ShapeElement = { type: "shape", id: this.currentStroke.id, kind: optimized.kind, points: optimized.stroke.points, color: this.currentStroke.color, size: this.currentStroke.size, closed: optimized.kind !== "line" && optimized.kind !== "arrow", fillColor: this.settings().fillColor, fillOpacity: this.settings().fillOpacity };
+        const shape: ShapeElement = { type: "shape", id: this.currentStroke.id, kind: optimized.kind, points: optimized.stroke.points, color: this.currentStroke.color, size: this.currentStroke.size, closed: optimized.kind !== "line" && optimized.kind !== "arrow", fillOpacity: 0 }; // erkannte Form = Kontur (Nutzerbefund 11.9.2026, Code-Audit H-06)
         elements[index] = shape;
         if (optimized.kind === "line") {
           const page = { id: pageNumber, width: 1000, height: 1000, paper: "blank" as const, elements };
-          mergeClosedLineShapes(page, this.settings().fillColor, this.settings().fillOpacity);
+          mergeClosedLineShapes(page, undefined, 0);
           this.document.pages[pageNumber] = page.elements;
         }
       }
@@ -298,12 +302,17 @@ export class PdfAnnotationManager {
     const path = this.sidecarPath(file);
     const sidecar = this.app.vault.getAbstractFileByPath(path);
     if (sidecar instanceof TFile) {
-      try {
-        const parsed = JSON.parse(await this.app.vault.cachedRead(sidecar)) as PdfInkDocument;
-        if (parsed.version === 1 && parsed.pdfPath === file.path && parsed.pages) return parsed;
-      } catch (error) { console.error("Smooth Handwriting PDF sidecar could not be read", error); }
+      let text: string | null = null;
+      try { text = await this.app.vault.cachedRead(sidecar); }
+      catch (error) {
+        console.error("Smooth Handwriting: PDF-Seitennotizen nicht lesbar", error);
+        // Vorhandene, aber unlesbare Datei: sperren statt als „fehlend“ frisch
+        // zu beginnen — ein Save würde sonst das Original überschreiben.
+        return this.sidecar.markUnreadable(file.path);
+      }
+      return this.sidecar.adopt(file.path, text);
     }
-    return { version: 1, pdfPath: file.path, pages: {} };
+    return this.sidecar.adopt(file.path, null);
   }
 
   private scheduleSave(): void {
@@ -315,15 +324,69 @@ export class PdfAnnotationManager {
     const file = this.pdfFile;
     const document = this.document;
     if (!file || !document) return;
+    if (!this.sidecar.writable) { this.refreshRecoveryUI(); return; }
     const settings = this.settings();
     const folder = normalizePath(`${settings.folder}/PDF`);
     const root = normalizePath(settings.folder);
     const path = normalizePath(`${settings.folder}/PDF/${safeName(file.path)}`);
     const content = JSON.stringify(document);
-    if (!this.app.vault.getAbstractFileByPath(root)) await this.app.vault.createFolder(root);
-    if (!this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
-    const existing = this.app.vault.getAbstractFileByPath(path);
-    if (existing instanceof TFile) await this.app.vault.modify(existing, content);
-    else await this.app.vault.create(path, content);
+    try {
+      if (!this.app.vault.getAbstractFileByPath(root)) await this.app.vault.createFolder(root);
+      if (!this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
+      const existing = this.app.vault.getAbstractFileByPath(path);
+      if (existing instanceof TFile) await this.app.vault.modify(existing, content);
+      else await this.app.vault.create(path, content);
+    } catch (error) {
+      console.error("Smooth Handwriting: PDF-Seitennotizen nicht gespeichert", error);
+      new Notice("Smooth Handwriting konnte die PDF-Markierungen nicht speichern – bitte erneut versuchen.");
+    }
+  }
+
+  private refreshRecoveryUI(): void {
+    const root = this.attachedRoot;
+    if (!root) return;
+    this.recoveryBanner?.remove();
+    this.recoveryBanner = null;
+    if (this.sidecar.writable) {
+      for (const button of this.pdfToolButtons) button.disabled = false;
+      return;
+    }
+    // Read-only: Werkzeuge sperren, sichtbarer Wiederherstellungsweg statt stillem leeren Dokument.
+    for (const button of this.pdfToolButtons) button.disabled = true;
+    this.tool = "off";
+    this.updateCanvasMode();
+    const banner = root.createDiv({ cls: "hp-pdf-recovery" });
+    banner.createSpan({ text: "PDF-Notizen beschädigt oder unlesbar – Markierungen sind angehalten." });
+    const recover = banner.createEl("button", { text: "Original sichern & neu beginnen" });
+    recover.addEventListener("click", () => void this.recoverCorruptSidecar());
+    this.recoveryBanner = banner;
+  }
+
+  private async recoverCorruptSidecar(): Promise<void> {
+    const file = this.pdfFile;
+    if (!file) return;
+    let raw = this.sidecar.rawContent;
+    if (raw === null) {
+      try {
+        const existing = this.app.vault.getAbstractFileByPath(this.sidecarPath(file));
+        if (existing instanceof TFile) raw = await this.app.vault.cachedRead(existing);
+      } catch (error) { console.error("Smooth Handwriting: Original-Seitennotizen nicht lesbar", error); }
+    }
+    if (raw === null) {
+      new Notice("Smooth Handwriting: Original-Markierungen nicht lesbar – keine Änderung.");
+      return;
+    }
+    const backupPath = `${this.sidecarPath(file)}.corrupt-${Date.now()}.bak`;
+    try {
+      await this.app.vault.create(backupPath, raw);
+      this.document = this.sidecar.recover(file.path);
+      this.refreshRecoveryUI();
+      for (const pageNumber of this.canvases.keys()) this.draw(pageNumber);
+      new Notice("Original-Markierungen gesichert – diese PDF kann wieder beschrieben werden.");
+      void this.save();
+    } catch (error) {
+      console.error("Smooth Handwriting: Sicherung fehlgeschlagen", error);
+      new Notice("Smooth Handwriting: Sicherung fehlgeschlagen – Original blieb unverändert.");
+    }
   }
 }

@@ -1,5 +1,6 @@
 import { HighlightElement, ImageElement, ShapeElement, StrokeElement, TextElement } from "./document";
 import { InkStroke, pressureWidth, visibleInkColor } from "./strokes";
+import {drawShapeMeasurements} from "./shape-measurements";
 
 export function drawInkStroke(context: CanvasRenderingContext2D, stroke: InkStroke, laser = false): void {
   if (stroke.points.length === 0) return;
@@ -21,7 +22,10 @@ export function drawInkStroke(context: CanvasRenderingContext2D, stroke: InkStro
     const start = index === 0 ? before : { x: (prior.x + before.x) / 2, y: (prior.y + before.y) / 2 };
     const end = index === stroke.points.length - 2 ? point : { x: (before.x + point.x) / 2, y: (before.y + point.y) / 2 };
     context.lineWidth = (pressureWidth(stroke, before) + pressureWidth(stroke, point)) / 2;
-    context.beginPath(); context.moveTo(start.x, start.y); context.quadraticCurveTo(before.x, before.y, end.x, end.y); context.stroke();
+    context.beginPath();
+    void stroke.inkGeometry; // Rendering vereinheitlicht: Kurven-Zwischenschritte für alle Tinten (keine Polygon-Schrift).
+    context.moveTo(start.x, start.y); context.quadraticCurveTo(before.x, before.y, end.x, end.y);
+    context.stroke();
   }
   context.restore();
 }
@@ -148,7 +152,7 @@ function drawArrowHead(context: CanvasRenderingContext2D, start: { x: number; y:
 
 export function drawShape(context: CanvasRenderingContext2D, shape: ShapeElement): void {
   if (shape.points.length === 0) return;
-  if (isSketchShape(shape)) { drawSketchShape(context, shape); return; }
+  if (isSketchShape(shape)) { drawSketchShape(context, shape); drawShapeMeasurements(context,shape); return; }
   context.save(); context.strokeStyle = visibleInkColor(shape.color); context.lineWidth = shape.size;
   context.lineCap = shape.kind === "ellipse" || shape.kind === "line" || shape.kind === "arrow" ? "round" : "butt";
   context.lineJoin = shape.kind === "ellipse" ? "round" : "miter";
@@ -175,6 +179,7 @@ export function drawShape(context: CanvasRenderingContext2D, shape: ShapeElement
     context.save(); context.globalAlpha = shape.fillOpacity ?? 0; context.fillStyle = shape.fillColor; context.fill(); context.restore();
   }
   context.stroke(); context.restore();
+  drawShapeMeasurements(context,shape);
 }
 
 export function drawHighlight(context: CanvasRenderingContext2D, highlight: HighlightElement): void {
@@ -241,7 +246,7 @@ export function drawText(context: CanvasRenderingContext2D, text: TextElement, f
     context.save(); context.font=`${text.fontStyle ?? "normal"} ${text.fontWeight ?? 400} ${text.fontSize}px ${textFontFamilies.sans}`;
     context.lineWidth=1; context.strokeStyle="#b9c5d3";
     cells.forEach((row,r)=>row.forEach((value,c)=> {
-      const x=text.x+c*cw, y=top+r*rh; context.fillStyle=r===0 ? "#edf3fa" : "#ffffff"; context.fillRect(x,y,cw,rh); context.strokeRect(x,y,cw,rh);
+      const x=text.x+c*cw, y=top+r*rh; context.strokeRect(x,y,cw,rh);
       context.save(); context.beginPath(); context.rect(x+5,y+2,Math.max(0,cw-10),Math.max(0,rh-4)); context.clip(); context.fillStyle=text.color;
       context.textAlign=text.textAlign ?? "left";
       const tx=text.textAlign==="center" ? x+cw/2 : text.textAlign==="right" ? x+cw-8 : x+8;
@@ -272,6 +277,16 @@ export function drawText(context: CanvasRenderingContext2D, text: TextElement, f
   context.restore();
 }
 
+export const imageCache = new Map<string, HTMLImageElement>();
+/** Shared so the editor, PDF export and miniatures all reuse one decoded image. */
+export function cachedImage(element: ImageElement, onload?: () => void): HTMLImageElement {
+  const existing = imageCache.get(element.dataUrl); if (existing) return existing;
+  const image = new Image(); imageCache.set(element.dataUrl, image);
+  image.onload = () => onload?.();
+  image.src = element.dataUrl;
+  return image;
+}
+
 export function drawBoardElement(context: CanvasRenderingContext2D, element: StrokeElement | ShapeElement | HighlightElement | TextElement, fontFamily?: string): void {
   if (element.type === "stroke") drawInkStroke(context, element);
   else if (element.type === "shape") drawShape(context, element);
@@ -279,10 +294,3 @@ export function drawBoardElement(context: CanvasRenderingContext2D, element: Str
   else drawText(context, element, fontFamily);
 }
 
-export const imageCache = new Map<string, HTMLImageElement>();
-
-export function cachedImage(element: ImageElement, onload?: () => void): HTMLImageElement {
-  const existing = imageCache.get(element.dataUrl); if (existing) return existing;
-  const image = new Image(); imageCache.set(element.dataUrl, image);
-  if (onload) image.addEventListener("load", onload, { once: true }); image.src = element.dataUrl; return image;
-}

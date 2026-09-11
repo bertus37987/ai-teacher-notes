@@ -20,11 +20,17 @@ export interface InkPoint {
   x: number;
   y: number;
   pressure: number;
+  /** Stiftneigung in Radian (0 = senkrecht); 0 bei Maus/Touch. */
+  tilt?: number;
   /** DOMHighResTimeStamp in milliseconds when available. */
   time?: number;
 }
 
 export interface InkStroke {
+  /** Captured/once-optimized ink must not be rounded a second time by rendering. */
+  inkGeometry?: "captured";
+  /** Brush tool: width follows drawing speed (slow = wide, fast = thin). */
+  brush?: boolean;
   id: string;
   color: string;
   size: number;
@@ -183,7 +189,11 @@ export function cleanCapturedStroke(points: InkPoint[], finished = false): InkPo
 export function pressureWidth(stroke: InkStroke, point: InkPoint): number {
   const sensitivity = Math.max(0, Math.min(1, stroke.pressureSensitivity ?? 0));
   const pressure = Math.max(0.05, Math.min(1, point.pressure || 0.5));
-  return stroke.size * ((1 - sensitivity) + sensitivity * (0.32 + pressure * 1.15));
+  // Neigung (Yoga-Wacom, Apple Pencil): flacher aufgesetzter Stift malt breiter
+  // (Schattierung), senkrechter Stift bleibt fein. max. ±30 % Modulation.
+  const tilt = Math.min(1, (point.tilt ?? 0) / 1.1);
+  const tiltFactor = 1 + tilt * 0.3 * sensitivity;
+  return stroke.size * tiltFactor * ((1 - sensitivity) + sensitivity * (0.32 + pressure * 1.15));
 }
 
 /** Makes legacy theme-derived light gray ink readable on the white paper. */

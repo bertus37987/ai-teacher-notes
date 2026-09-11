@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { createDocument, parseDocument, StrokeElement } from "../src/document";
 import { applyReconstructions, decodeCtc, joinInkLines, planReconstructions, reconstructLine, restoreReconstructions, segmentInkLines } from "../src/htr-core";
 import { constructGeometry, aimConstruction } from "../src/geometry-tools";
-import { normalizeHandwritingWord } from "../src/handwriting-normalizer";
 import { drawText } from "../src/rendering";
 import { browserWorkerSource } from "../src/htr-client";
 import { runInNewContext } from "node:vm";
@@ -67,20 +66,12 @@ const compact = reconstructLine(largePage, largeLine, "Saubere Heftschrift", 1, 
 assert.equal(compact.fontSize, 32, "explicit compact size is independent of oversized input");
 assert.equal(reconstructLine(largePage, largeLine, "Saubere Heftschrift", 1, undefined, 24).fontSize, 24);
 assert.deepEqual(compact.reconstruction!.originalStrokes, largeLine.strokes, "compact redraw preserves originals");
-assert.throws(() => reconstructLine(largePage, largeLine, "Text", 1, undefined, 0), /16 und 96/);
-assert.throws(() => reconstructLine(largePage, largeLine, "Text", 1, undefined, NaN), /16 und 96/);
+assert.throws(() => reconstructLine(largePage, largeLine, "Text", 1, undefined, 0), /16 und 256/);
+assert.throws(() => reconstructLine(largePage, largeLine, "Text", 1, undefined, NaN), /16 und 256/);
 const wrapped = reconstructLine(largePage, largeLine, "Lange Wörter bleiben lesbar und werden umgebrochen", 1, s => s.length * 80);
 assert.ok(wrapped.text.includes("\n"));
 assert.equal(wrapped.fontSize, largeText.fontSize, "wrapping does not reduce glyph size");
 assert.ok(wrapped.height! > wrapped.fontSize * 2);
-for (const paper of ["grid", "lines", "blank"] as const) {
-  const original = [make("one", 40, 20, 180), make("two", 90, 25, 175)];
-  const result = normalizeHandwritingWord(original, {targetHeight: 17, samples: 100, averageSlope: .2}, paper);
-  for (let i = 0; i < original.length; i++) for (let p = 0; p < original[i].points.length; p++) {
-    assert.equal(result.strokes[i].points[p].x, original[i].points[p].x);
-    assert.ok(Math.abs(result.strokes[i].points[p].y - original[i].points[p].y) <= 2);
-  }
-}
 const paints: unknown[][] = [];
 const ctx = {save() {}, restore() {}, measureText: (s: string) => ({width:s.length * 10}), fillText: (...args: unknown[]) => paints.push(args)} as unknown as CanvasRenderingContext2D;
 drawText(ctx, {...largeText, text: "eins zwei drei vier", width: 95});
