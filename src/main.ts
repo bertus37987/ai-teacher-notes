@@ -30,6 +30,8 @@ import type { AgentProposalOutcome } from "./agent-channel";
 import { exportNotebookBackup, parseNotebookBackup, prepareBackupPages } from "./notebook-transfer";
 import { ONE_NOTE_MAX_BYTES, ONE_NOTE_PAGE_HEIGHT, ONE_NOTE_PAGE_WIDTH, blocksToPageElements, buildOneNoteHtml, extractOneNoteBlocks, layoutOneNoteBlocks, parseMhtArchive, textElementToHtml } from "./onenote-transfer";
 import type { PDFDocumentProxy } from "pdfjs-dist";
+import type { LeafLike } from "./command-target";
+import { editableLeaf, pickMarkdownLeaf } from "./command-target";
 import caveatFontBytes from "../web/fonts/caveat-latin.woff2";
 
 type Tool = "pen" | "brush" | "highlight" | "eraser" | "laser" | "fill" | "select" | ShapeDragTool;
@@ -2765,27 +2767,20 @@ export default class SmoothHandwritingPlugin extends Plugin {
     }
     this.addSettingTab(new SmoothHandwritingSettingTab(this.app, this));
     this.addCommand({ id: "pen-diagnostic", name: "Stift-Diagnose (was meldet mein Stift?)", callback: () => this.showPenDiagnostic() });
-    // checkCallback statt editorCallback: der Befehl erscheint auch dann in Strg+P, wenn der
-    // Fokus gerade nicht im Editor liegt — vorher war er dort unsichtbar (Nutzerbefund 11.9.2026).
+    // callback statt checkCallback: mit checkCallback verschwindet der Befehl aus der
+    // Befehlspalette, sobald kein Markdown-Editor aktiv ist. Auf dem iPad öffnet Obsidian Notizen
+    // in der Leseansicht — dort war „Handschriftblock einfügen" gar nicht auffindbar, während die
+    // Stift-Diagnose (callback) stehen blieb (Nutzerbefund 13.9.2026). Das Ziel sucht sich der
+    // Befehl jetzt selbst und stellt die Notiz bei Bedarf auf Bearbeiten um.
     this.addCommand({
       id: "insert-handwriting-block",
       name: "Handschriftblock einfügen",
-      checkCallback: (checking: boolean) => {
-        const editor = this.app.workspace.activeEditor?.editor;
-        if (!editor) return false;
-        if (!checking) void this.insertBlock(editor);
-        return true;
-      }
+      callback: () => void this.runBlockCommand("insert")
     });
     this.addCommand({
       id: "remove-handwriting-block",
       name: "Handschriftblock wieder entfernen",
-      checkCallback: (checking: boolean) => {
-        const editor = this.app.workspace.activeEditor?.editor;
-        if (!editor) return false;
-        if (!checking) void this.removeBlock(editor);
-        return true;
-      }
+      callback: () => void this.runBlockCommand("remove")
     });
     this.registerMarkdownCodeBlockProcessor("handschrift", async (source, element, context) => this.renderBlock(source.trim(), element, context));
     this.pdfManager = new PdfAnnotationManager(this.app, () => this.settings, () => this.persistSettings()); this.pdfManager.onload(); this.register(() => this.pdfManager.unload());
@@ -2865,6 +2860,22 @@ export default class SmoothHandwritingPlugin extends Plugin {
     return this.sharedRecognizerInstance;
   }
   disposeSharedRecognizer(): void { this.sharedRecognizerInstance?.dispose(); this.sharedRecognizerInstance = undefined; }
+  /** Die offene Notiz — notfalls die einzige Markdown-Ansicht, auch wenn gerade keine „aktiv" ist. */
+  private markdownLeaf(): LeafLike | null {
+    const views: LeafLike[] = [];
+    const active = (this.app.workspace.activeEditor as unknown as { view?: LeafLike } | null)?.view ?? null;
+    this.app.workspace.iterateAllLeaves((leaf) => { views.push(leaf.view as unknown as LeafLike); });
+    return pickMarkdownLeaf(views, active);
+  }
+  /** Zielsuche für die Block-Befehle; stellt eine Notiz in der Leseansicht auf Bearbeiten um. */
+  private blockCommandTarget(): Promise<{ editor: Editor } | { error: string }> {
+    return editableLeaf(this.markdownLeaf()) as Promise<{ editor: Editor } | { error: string }>;
+  }
+  private async runBlockCommand(kind: "insert" | "remove"): Promise<void> {
+    const target = await this.blockCommandTarget();
+    if ("error" in target) { new Notice(target.error); return; }
+    if (kind === "insert") await this.insertBlock(target.editor); else await this.removeBlock(target.editor);
+  }
   private async insertBlock(editor: Editor): Promise<void> {
     const folder = normalizePath(this.settings.folder.trim() || DEFAULT_SETTINGS.folder); if (!this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
     const stamp = new Date().toISOString().replace(/[:.]/g, "-"); const path = normalizePath(`${folder}/Handschrift-${stamp}.handwriting.json`);

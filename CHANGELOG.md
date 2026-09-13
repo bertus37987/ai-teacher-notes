@@ -1,5 +1,26 @@
 # Changelog — Smooth Handwriting
 
+## 0.25.35 (13. September 2026) — Block-Befehle sind auch auf dem iPad auffindbar
+
+- **Fehler behoben: In der Befehlspalette erschien nur „Stift-Diagnose", der Befehl
+  „Handschriftblock einfügen" fehlte.** Beide Block-Befehle waren als `checkCallback`
+  registriert und verlangten einen aktiven Markdown-**Editor**. Auf dem iPad öffnet
+  Obsidian Notizen in der **Leseansicht** — `workspace.activeEditor` ist dann leer und
+  Obsidian blättert einen `checkCallback`-Befehl, dessen Prüfung `false` ergibt, gar
+  nicht erst in die Liste. Sichtbar blieb nur die Stift-Diagnose, die einen gewöhnlichen
+  `callback` benutzt.
+- **Beide Befehle stehen jetzt dauerhaft in der Palette** (`Handschriftblock einfügen`
+  und `Handschriftblock wieder entfernen`) und suchen ihr Ziel selbst: die aktive Notiz,
+  sonst irgendeine Markdown-Notiz — auch wenn gerade die Dateiliste oder die Suche den
+  Fokus hat.
+- **Leseansicht wird automatisch bearbeitbar:** Steht die Notiz in der Leseansicht,
+  schaltet der Befehl sie auf Bearbeiten um (ohne Verlaufseintrag) und wartet kurz auf
+  den Editor, statt wirkungslos zu bleiben. Ist überhaupt keine Notiz geöffnet, sagt ein
+  Hinweis genau das.
+- Die Auswahl- und Umschaltlogik liegt als DOM-freie Einheit in `src/command-target.ts`
+  (`pickMarkdownLeaf`, `editableLeaf`) und ist samt Regressionstest geprüft: der Test
+  verhindert, dass die Befehle je wieder auf `checkCallback` zurückfallen.
+
 ## 0.25.34 (13. September 2026) — Handschrift-Schrift liegt im Bundle
 
 - **Fehler behoben: „Handschrift-Font fehlt. Bitte das vollständige Plugin-ZIP

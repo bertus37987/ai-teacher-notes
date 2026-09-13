@@ -1,6 +1,6 @@
 # Smooth Handwriting — so installieren es Freunde
 
-Stand: 13. September 2026 · Version **0.25.34** · Repo: <https://github.com/bertus37987/ai-teacher-notes>
+Stand: 13. September 2026 · Version **0.25.35** · Repo: <https://github.com/bertus37987/ai-teacher-notes>
 
 Die Erweiterung ist als Beta veröffentlicht: Das Repo ist öffentlich und das neueste Release hängt
 `main.js`, `manifest.json`, `styles.css` sowie ein vollständiges ZIP an. Für Fremde gibt es deshalb
@@ -65,6 +65,9 @@ Erkennung damit vorerst außen vor.
 - **Die Handschrift-Schrift steckt seit 0.25.34 im Programm** (`main.js`), nicht mehr in
   `assets/`. Vorher meldete jede BRAT- oder Store-Installation beim Start
   „Handschrift-Font fehlt. Bitte das vollständige Plugin-ZIP installieren." — das ist behoben.
+- **„Handschriftblock einfügen" ist seit 0.25.35 immer in der Befehlspalette**, auch wenn
+  keine Notiz im Bearbeitungsmodus offen ist (iPad: Obsidian öffnet Notizen in der Leseansicht).
+  Der Befehl stellt die Notiz dann selbst auf Bearbeiten um.
 - **iPad ist weiterhin ungetestet.** `isDesktopOnly: false` ist gesetzt, probiert hat es aber noch
   niemand.
 - **Nicht im Community-Store.** Deshalb findet man die Erweiterung in Obsidian nicht über
@@ -72,10 +75,10 @@ Erkennung damit vorerst außen vor.
   nötig (ID `smooth-handwriting` ist frei, Prüfung dauert Tage bis Wochen). Sobald der Eintrag
   durch ist, genügt „Suchen → Installieren → Aktivieren" und BRAT wird überflüssig.
 
-## Prüfsummen 0.25.34 (Release = lokaler Build = hier installiert)
+## Prüfsummen 0.25.35 (Release = lokaler Build = hier installiert)
 
 ```
-82958cbbcc636e45eb9ffea3d73685ab6389c279644bab3125057c3fb884ba8a  main.js
-07fe95563598f75f790766089fc4eace50cb8d3d094e69e7aaa026da51055b75  manifest.json
+0cf20e04a86ed4067b19a532db1f3a78d24607478d16c2a5b4197d69be9d93a0  main.js
+60c7d973d1aa7e7dbc51195648e61acc19288d9a4bd8dac66dc453b28ca134f7  manifest.json
 fc13db68dfc13a1dd3e3a40b14927e0ea9440ece3c00f3715fb224147f84a596  styles.css
 ```
