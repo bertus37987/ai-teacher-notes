@@ -1,5 +1,26 @@
 # Changelog — Smooth Handwriting
 
+## 0.25.37 (13. September 2026) — Schreibschrift wurde weggekritzelt
+
+Zweite Ursache des iPad-Befunds „es verschwindet text manchmal", gefunden beim Weitermessen
+der Gesten-Klassifizierer. Der Fehler war nicht iPad-spezifisch, traf dort aber jeden, der
+Schreibschrift schreibt — und er ist standardmäßig aktiv (`scratchErase: true`).
+
+- **Scribble-to-Erase hielt Schreibschrift für Kritzelei und löschte sie.** Die Geste verlangte
+  nur Tortuosität, Richtungswechsel und scharfe Rückwendungen — und genau das erfüllen
+  Schleifenbuchstaben: gemessen löste schon **„lll" (drei Buchstaben)** die Geste aus und
+  entfernte die Striche darunter samt Undo-Eintrag („Text weg"). Jetzt muss ein Zug zusätzlich
+  die **Rücklauf-Bewegung** echter Kritzelei zeigen (Summe |dx| geteilt durch die x-Spanne).
+  Messwerte an zwölf Proben: Schrift 1,00–2,49 · Kritzelei 10,93–11,38 — die Schwelle 4 liegt
+  mit Faktor 1,6 bzw. 2,7 dazwischen.
+- **Der bestehende Vertrag bleibt gültig:** ein einzelner hektischer Zickzack-Zug über die
+  betroffenen Striche löscht weiterhin (Absicherung in beide Richtungen getestet —
+  `tests/scribble-guard.test.ts`, 18 Fälle: elf Schriftproben dürfen nicht löschen, drei
+  Kritzelproben müssen löschen, dazu das Trennmaß selbst und ein Quelltext-Vertrag).
+
+Nicht geändert: Kreis-Lasso, Form-Erkennung und Halten-Snap (bei Schriftproben gemessen
+ohne Fehlauslösung).
+
 ## 0.25.36 (13. September 2026) — iPad: Text verschwand, Stift reagierte manchmal nicht
 
 Nutzerbefund vom iPad: „der handschriebene Text verschwindet manchmal, der Eingang wird erst

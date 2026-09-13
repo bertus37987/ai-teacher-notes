@@ -199,6 +199,28 @@ export function circleLassoGesture(stroke: InkStroke, page: HandwritingPage): bo
   return errors.reduce((sum, error) => sum + error, 0) / errors.length <= 0.12 && Math.max(...errors) <= 0.28;
 }
 
+/** Mindest-Rücklauf: so oft muss der Zug seine Spanne durchlaufen, um als „Wegkritzeln" zu gelten. */
+export const SCRIBBLE_MIN_BACK_AND_FORTH = 4;
+
+/**
+ * Rücklauf-Verhältnis: Summe aller |dx| geteilt durch die Spanne in x.
+ * Schrift wandert vorwärts (nahe 1), Kritzelei läuft dieselbe Spanne viele Male zurück.
+ * Gemessen 13.9.2026 an 12 Proben: Schrift 1,00–2,49 · Kritzelei 10,93–11,38.
+ */
+export function backAndForthRatio(points: InkPoint[]): number {
+  let travel = 0;
+  let minX = Infinity;
+  let maxX = -Infinity;
+  for (let i = 0; i < points.length; i += 1) {
+    const x = points[i].x;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (i > 0) travel += Math.abs(x - points[i - 1].x);
+  }
+  const span = maxX - minX;
+  return span > 0 ? travel / span : 0;
+}
+
 /** Scribble-to-Erase: enge, hektische Zickzack-Gekritzel, nicht normale Schrift. */
 export function scratchEraseGesture(stroke: InkStroke): boolean {
   if (stroke.points.length < 12) return false;
@@ -226,7 +248,13 @@ export function scratchEraseGesture(stroke: InkStroke): boolean {
       previousDirection = direction;
     }
   }
-  return pathLength / Math.max(1, diagonal) >= 2.6 && flips >= 5 && reversals >= 5;
+  if (!(pathLength / Math.max(1, diagonal) >= 2.6 && flips >= 5 && reversals >= 5)) return false;
+  // Schreibschrift mit Schleifen lief bis 0.25.36 in dieselbe Falle: schon drei Schleifenbuchstaben
+  // erreichen Tortuosität, Flips und Reversals eines Kritzelzugs und löschten damit die Tinte
+  // darunter (gemessen 13.9.2026: „lll" ⇒ Löschgeste ⇒ Text weg). Was Kritzelei von Schrift
+  // trennt, ist die RÜCKLAUF-Bewegung: Kritzelei fährt dieselbe Spanne viele Male zurück,
+  // Schrift wandert vorwärts. Gemessen an 12 Proben: Schrift 1,00–2,49 · Kritzelei 10,93–11,38.
+  return backAndForthRatio(stroke.points) >= SCRIBBLE_MIN_BACK_AND_FORTH;
 }
 
 function pointSegmentDistance(point: Position, a: Position, b: Position): number {
