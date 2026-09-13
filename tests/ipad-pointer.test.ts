@@ -13,7 +13,7 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { runInNewContext } from "node:vm";
-import { PenPressureTracker, pressureVaries, strokeIsStuck } from "../src/input-device";
+import { PenPressureTracker, describePenDiagnostic, pressureVaries, strokeIsStuck } from "../src/input-device";
 
 const requireFromProject = createRequire(`${process.cwd()}/package.json`);
 const { buildSync } = requireFromProject("esbuild");
@@ -200,4 +200,23 @@ const inked = (page: any) => page.elements.reduce((n: number, el: any) => n + (e
   assert.equal(strokeIsStuck(0, 99999), false, "ohne begonnenen Strich nie hängend");
 }
 
-console.log("iPad-Zeigerlebenszyklus: 12 Fälle bestanden");
+// 13. Die Stift-Diagnose muss die Unterbrechungen ausweisen — nur so kann der iPad-Nutzer
+// bestätigen, dass iOS wirklich pointercancel/lostpointercapture schickt.
+{
+  const basis = { pointerType: "pen", pressure: 0.4, tiltX: 0, tiltY: 0, buttons: 1, isPrimary: true, classifiedAsPen: true, penModeActive: true, time: 100 };
+  const mitAbbruch = describePenDiagnostic([
+    { ...basis, type: "pointerdown", time: 100 },
+    { ...basis, type: "pointermove", time: 108 },
+    { ...basis, type: "pointercancel", time: 116 }
+  ]);
+  assert.ok(/Unterbrechungen: 1/.test(mitAbbruch), "ein Abbruch wird gezählt und benannt");
+  assert.ok(/Tinte dabei erhalten/.test(mitAbbruch), "die Diagnose erklärt, dass die Tinte bleibt");
+  const ohneAbbruch = describePenDiagnostic([{ ...basis, type: "pointermove", time: 100 }, { ...basis, type: "pointermove", time: 110 }]);
+  assert.ok(/Unterbrechungen: keine/.test(ohneAbbruch), "ohne Abbruch sagt die Diagnose das ausdrücklich");
+  const plateau = describePenDiagnostic([{ ...basis, pressure: 1, type: "pointermove", time: 100 }, { ...basis, pressure: 1, type: "pointermove", time: 110 }]);
+  assert.ok(/KONSTANT/.test(plateau), "ein konstantes Druck-Plateau wird als solches ausgewiesen");
+  const echt = describePenDiagnostic([{ ...basis, pressure: 0.3, type: "pointermove", time: 100 }, { ...basis, pressure: 0.9, type: "pointermove", time: 110 }]);
+  assert.ok(/schwankt/.test(echt), "schwankender Druck wird als echter Anschlag ausgewiesen");
+}
+
+console.log("iPad-Zeigerlebenszyklus: 13 Fälle bestanden");

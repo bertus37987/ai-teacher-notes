@@ -140,6 +140,12 @@ export interface PenDiagnosticSample {
    * Kleben sie bei 16,7 ms, bremst der Bildschirmtakt (Compositor/Electron).
    */
   time: number;
+  /**
+   * Ereignisart. Wichtig auf dem iPad: `pointercancel` und `lostpointercapture` sind die
+   * Ereignisse, die einen laufenden Strich unterbrechen (Handballen, Gestenerkennung,
+   * App-Wechsel). Erscheinen sie in der Diagnose, ist die iPad-Symptomatik bestätigt.
+   */
+  type?: string;
 }
 
 export function describePenDiagnostic(samples: PenDiagnosticSample[]): string {
@@ -161,6 +167,13 @@ export function describePenDiagnostic(samples: PenDiagnosticSample[]): string {
   const neigungen = samples.map(sample => Math.abs(sample.tiltX) + Math.abs(sample.tiltY));
   const alsStift = samples.filter(sample => sample.classifiedAsPen).length;
   const stiftModus = samples.filter(sample => sample.penModeActive).length;
+  // Unterbrechungen: der Beleg für „Text verschwindet / reagiert manchmal nicht".
+  const abbrueche = samples.filter(sample => sample.type === "pointercancel" || sample.type === "lostpointercapture").length;
+  const abbruchZeile = abbrueche > 0
+    ? `Unterbrechungen: ${abbrueche} (pointercancel/lostpointercapture)`
+      + "\n  ⇒ Das iPad hat Striche abgebrochen (Handballen, Gestenerkennung oder App-Wechsel)."
+      + "\n     Seit 0.25.36 bleibt die geschriebene Tinte dabei erhalten."
+    : "Unterbrechungen: keine (kein pointercancel/lostpointercapture gesehen)";
   const zahl = (wert: number) => (Math.round(wert * 1000) / 1000).toString();
 
   // Abtastrate: Abstand zwischen zwei aufeinanderfolgenden Proben. Das ist die
@@ -207,6 +220,7 @@ export function describePenDiagnostic(samples: PenDiagnosticSample[]): string {
         : "  (KONSTANT — der Treiber meldet nur ein Plateau; Stärke folgt dann festen Werten)"),
     `Neigung: ${zahl(Math.min(...neigungen))} … ${zahl(Math.max(...neigungen))}`,
     `als Stift erkannt: ${alsStift} von ${samples.length}`,
-    `Stiftmodus aktiv: ${stiftModus} von ${samples.length}`
+    `Stiftmodus aktiv: ${stiftModus} von ${samples.length}`,
+    abbruchZeile
   ].join("\n");
 }

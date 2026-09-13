@@ -1367,6 +1367,12 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
   private pointerUp(event: PointerEvent, pageId: string): void {
     const page = this.page(pageId); const canvas = this.canvases.get(pageId);
     if (!page || !canvas) return;
+    // Abbruch-Ereignisse erreichen `updateReticle` nie (sie kommen direkt hierher). Für die
+    // Stift-Diagnose werden sie deshalb ausdrücklich erfasst — sonst könnte die Diagnose den
+    // iPad-Fall „Strich wurde unterbrochen" gar nicht anzeigen (Selbstbefund 13.9.2026).
+    if (event.type === "pointercancel" || event.type === "lostpointercapture") {
+      if (typeof this.plugin.recordPenSample === "function") this.plugin.recordPenSample(event, true, this.penHoverState === true);
+    }
     if (this.touchScroll.has(event.pointerId)) {
       this.touchScroll.delete(event.pointerId);
       if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
@@ -2913,7 +2919,8 @@ export default class SmoothHandwritingPlugin extends Plugin {
       isPrimary: event.isPrimary,
       classifiedAsPen,
       penModeActive,
-      time: event.timeStamp
+      time: event.timeStamp,
+      type: event.type
     });
   }
 
