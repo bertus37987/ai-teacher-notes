@@ -2,7 +2,7 @@ import { App, Editor, MarkdownPostProcessorContext, MarkdownRenderChild, Notice,
 import { HandwritingDocumentV3, HandwritingPage, HighlightElement, ImageElement, PageElement, Paper, ShapeElement, ShapeKind, StrokeElement, alignPageBaselines, cloneDocument, createDocument, createPage, elementBounds, mergeClosedLineShapes, parseNotebook } from "./document";
 import { normalizeHandwritingV2 } from "./handwriting-v2";
 import {PAPER_WRITING_DEFAULTS,PaperWritingSettings,paperWritingLayout,splitNewInkWords,isDrawingCluster} from "./handwriting-layout";
-import {penCursorActive,isPenInput,isFingerInput,describePenDiagnostic,PenDiagnosticSample} from "./input-device";
+import {penCursorActive,isPenInput,isFingerInput,describePenDiagnostic,PenDiagnosticSample,PenPressureTracker,strokeIsStuck} from "./input-device";
 import { drawShapeMeasurements, shapeMeasurements } from "./shape-measurements";
 import { ShapeDragTool, draggedShapePoints, optimizeShape, shapeContainsPoint, snapLineAngle, snapStrokeEndpoints } from "./shapes";
 import { InkPoint, InkStroke, cleanCapturedStroke, pressureWidth, strokeTouches, visibleInkColor } from "./strokes";
@@ -433,6 +433,21 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
   private rulerSnapping = false;
   private rulerToolButton?: HTMLButtonElement;
   private lastMovePoint: { x: number; y: number } | null = null;
+  /**
+   * Sicherheitsnetz gegen hängende Striche (iPad-Befund 13.9.2026): iOS schickt beim Aufsetzen
+   * der Handfläche oder beim Wechsel in den Hintergrund nicht immer ein `pointerup`. Blieb der
+   * Editor danach in „Strich läuft" stehen, verschluckte der nächste `pointerdown` den neuen
+   * Strich lautlos — der Nutzer sah „reagiert manchmal nicht".
+   */
+  private lastPointerActivityTs = 0;
+  /** Beginn des laufenden Strichs — filtert verspätete Abschluss-Ereignisse (iOS). */
+  private strokeStartedTs = 0;
+  /** Client-Koordinate des laufenden Aufsetzens — erkennt doppelt gemeldete `pointerdown`. */
+  private strokeStartClient: { x: number; y: number } | null = null;
+  /** Letzte Client-Koordinate: ein Abbruch ohne Koordinaten darf keinen Strich ins Eck setzen. */
+  private lastClientPoint: { x: number; y: number } | null = null;
+  /** Druckauswertung je Zeiger — erkennt, ob der Treiber echten Druck liefert (Apple Pencil). */
+  private readonly pressureTracker = new PenPressureTracker();
   /** Bild/PDF-Input für den Upload-Button in der Werkzeugleiste. */
   private importImageInput!: HTMLInputElement;
   private zoom = 1;
@@ -1117,8 +1132,11 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     // isPenInput statt pointerType-Vergleich: manche Yoga-/Wacom-Treiber melden den
     // Stift als "mouse" — dann gingen Druck und Neigung verloren (Befund 11.9.2026).
     const isPen = isPenInput(event, this.plugin.settings.penForceMode);
-    const rawPressure = event.pressure;
-    const pressure = isPen && rawPressure > 0 && rawPressure < 1 ? rawPressure : isPen && rawPressure >= 1 ? 0.72 : 0.5;
+    // Druck über den Verlauf des Strichs auswerten, nicht über einen Einzelwert: Apple Pencil
+    // liefert echten Druck (auch 1.0 beim festen Aufdrücken), manche Wacom-Treiber nur ein
+    // konstantes Plateau. Vorher wurde jeder Wert ≥ 1 auf 0,72 verbogen — dadurch unterschied
+    // sich die iPad-Handschrift sichtbar von der Yoga-Handschrift.
+    const pressure = isPen ? this.pressureTracker.observe(event.pointerId, event.pressure).pressure : 0.5;
     const tilt = isPen ? Math.atan2(Math.hypot(event.tiltX ?? 0, event.tiltY ?? 0) / 100, 1) : 0;
     return { x: Math.max(0, Math.min(page.width, (event.clientX - rect.left) * page.width / rect.width)), y: Math.max(0, Math.min(page.height, (event.clientY - rect.top) * page.height / rect.height)), pressure, tilt, time: event.timeStamp };
   }
@@ -1127,9 +1145,26 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     this.updateReticle(event);
     // Fill-Delay: ein neuer Strich verwirft die noch ausstehende Füllung der zuletzt
     // gehaltenen Form — wer weiterschreibt, will keine nachträglich gefüllte Form.
-    if (!this.editing || this.objectEditing || this.pointerPageId !== null) return;
+    if (!this.editing || this.objectEditing) return;
     const page = this.page(pageId); const canvas = this.canvases.get(pageId);
     if (!page || !canvas) return;
+    // Ein hängender Strich darf den nächsten nicht verschlucken — genau das war das iPad-Symptom
+    // „reagiert manchmal nicht": iOS liefert beim Handballen oder App-Wechsel nicht immer ein
+    // `pointerup`, der Editor blieb in „Strich läuft" stehen und verwarf jeden neuen Kontakt.
+    if (this.pointerPageId !== null) {
+      // Handballen/Zweifinger dürfen den laufenden Stiftstrich NICHT abbrechen (Palm-Rejection).
+      if (isFingerInput(event, this.plugin.settings.penForceMode)) return;
+      const frisch = !strokeIsStuck(this.lastPointerActivityTs, event.timeStamp || Date.now(), 120);
+      // Dasselbe Aufsetzen doppelt gemeldet (kommt bei Stiften vor): identischer Zeiger, gleiche
+      // Stelle wie der Strichbeginn, praktisch gleichzeitig — es darf keinen Strich zerschneiden.
+      const derselbeStart = this.strokeStartClient !== null
+        && Math.hypot(event.clientX - this.strokeStartClient.x, event.clientY - this.strokeStartClient.y) < 3
+        && Math.abs((event.timeStamp || 0) - this.strokeStartedTs) < 120;
+      if (frisch && derselbeStart && this.activePointerId === event.pointerId) return;
+      // Sonst ist der alte Strich tot: erst sauber abschließen, dann den neuen beginnen.
+      if (this.activePointerId !== null) this.pointerUp(this.syntheticPointerUp(this.activePointerId), pageId);
+      if (this.pointerPageId !== null) return;
+    }
     if(this.pendingInsert && event.button===0) {
       event.preventDefault(); const table=this.pendingInsert==="table"; this.pendingInsert=null;
       this.setActivePage(pageId); void this.editTextElement(page,undefined,table,this.toPoint(event,page,canvas)); return;
@@ -1161,6 +1196,11 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     }
     if (event.button !== 0) return;
     event.preventDefault(); this.setActivePage(pageId); this.capturePointer(canvas, event.pointerId, pageId);
+    this.notePointerActivity(event);
+    // Zeitpunkt des Strichbeginns: ein verspätet eintreffendes Abschluss-Ereignis des VORIGEN
+    // Strichs darf diesen hier nicht beenden (iOS liefert `pointerup` gelegentlich nach).
+    this.strokeStartedTs = event.timeStamp;
+    this.strokeStartClient = { x: event.clientX, y: event.clientY };
     this.lastMoveTs = event.timeStamp;
     const point = this.toPoint(event, page, canvas);
     if (this.ruler) {
@@ -1231,7 +1271,13 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     }
     if (!this.editing || this.pointerPageId !== pageId) return;
     const page = this.page(pageId); const canvas = this.canvases.get(pageId);
-    if (!page || !canvas || !canvas.hasPointerCapture(event.pointerId)) return;
+    if (!page || !canvas) return;
+    // Safari/iOS bricht hier ab: der ERSTE pointermove nach setPointerCapture kommt ohne
+    // Capture an (WebKit-Bug 276287). Der frühere Capture-Test verwarf ihn — bei schnellem
+    // Schreiben fehlten dadurch Punkte bis hin zum Strichanfang. Der Zeigervergleich leistet
+    // dasselbe (fremde Zeiger bleiben draußen) und funktioniert auf allen Plattformen.
+    if (this.activePointerId !== event.pointerId) return;
+    this.notePointerActivity(event);
     event.preventDefault(); const coalesced = event.getCoalescedEvents?.(); const events = coalesced?.length ? coalesced : [event];
     if (this.rulerDrag && this.rulerDragStart && this.ruler && this.rulerStart) {
       const current = this.toPoint(event, page, canvas);
@@ -1327,9 +1373,20 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
       return;
     }
     if (this.pointerPageId !== pageId || this.activePointerId !== event.pointerId) return;
+    // Ein verspätet eintreffendes Abschluss-Ereignis des VORIGEN Strichs darf den laufenden nicht
+    // beenden. iOS liefert `pointerup` gelegentlich nach dem nächsten `pointerdown` (Befund 13.9.2026).
+    const verspaetet = event.type === "pointerup" && this.strokeStartedTs > 0 && event.timeStamp > 0 && event.timeStamp < this.strokeStartedTs;
+    if (verspaetet) return;
     let redrawOnFinish = true;
     try {
-    if (event.type === "pointercancel" || event.type === "lostpointercapture") {
+    // iOS bricht laufende Striche ab (Handballen, Gestenerkennung, App-Wechsel, Sperrbildschirm).
+    // Früher wurde die bereits geschriebene Tinte dabei gelöscht — genau das war das iPad-Symptom
+    // „manchmal verschwindet Text" (Befund 13.9.2026). Jetzt wird die Tinte behalten; nur
+    // Vorschau-Zustände (Auswahl-Rahmen, Lineal, Füllung) rollen weiterhin zurück.
+    const abgebrochen = event.type === "pointercancel" || event.type === "lostpointercapture";
+    const laufend = page.elements.find(candidate => candidate.id === this.currentElementId);
+    const istTinte = laufend?.type === "stroke" || laufend?.type === "highlight";
+    if (abgebrochen && !istTinte) {
       if (this.currentElementId) {
         page.elements = page.elements.filter(element => element.id !== this.currentElementId);
         this.history.pop();
@@ -1419,9 +1476,47 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     }
   }
 
+  /**
+   * Merkt sich, wann und wo zuletzt ein echter Zeigerkontakt war. Grundlage der Erkennung
+   * „dieser Strich läuft nicht mehr" (iPad-Befund 13.9.2026).
+   */
+  private notePointerActivity(event: { timeStamp: number; clientX?: number; clientY?: number }): void {
+    this.lastPointerActivityTs = event.timeStamp || Date.now();
+    if (typeof event.clientX === "number" && typeof event.clientY === "number") {
+      this.lastClientPoint = { x: event.clientX, y: event.clientY };
+    }
+  }
+
+  /**
+   * Baut ein Abschluss-Ereignis für einen Strich, dessen echtes `pointerup` nie ankam
+   * (iOS/Handballen/App-Wechsel). Es benutzt die zuletzt bekannte Position — ein Abbruch ohne
+   * Koordinaten darf den Strich nicht in die linke obere Ecke ziehen.
+   */
+  private syntheticPointerUp(pointerId: number): PointerEvent {
+    return {
+      type: "pointerup",
+      pointerId,
+      pointerType: "pen",
+      button: 0,
+      buttons: 0,
+      pressure: 0,
+      tiltX: 0,
+      tiltY: 0,
+      isPrimary: true,
+      clientX: this.lastClientPoint?.x ?? 0,
+      clientY: this.lastClientPoint?.y ?? 0,
+      // Zeitstempel = letzter echter Kontakt. Mit der aktuellen Uhrzeit hielte der Editor den
+      // Stift für „noch aufgelegt" und würde die Schrift in eine Form umwandeln (Halten-Erkennung).
+      timeStamp: this.lastPointerActivityTs || Date.now(),
+      preventDefault: () => {}
+    } as unknown as PointerEvent;
+  }
+
   /** All exits (including accepted gestures and cancellation) unlock save/undo. */
   private capturePointer(canvas: HTMLCanvasElement, pointerId: number, pageId: string): void {
-    canvas.setPointerCapture(pointerId);
+    // setPointerCapture kann auf iOS werfen (z. B. wenn der Zeiger schon weg ist) — der
+    // Editor darf daran nicht sterben, die Zeigerprüfung übernimmt den Schutz ohnehin.
+    try { canvas.setPointerCapture(pointerId); } catch { /* ohne Capture weiterarbeiten */ }
     this.activePointerId = pointerId;
     this.pointerPageId = pageId;
   }
@@ -1439,6 +1534,11 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     this.activePointerId = null;
     this.currentElementId = null; this.currentRawPoints = []; this.shapeDragStart = null;
     this.lastMoveTs = null; this.lastMovePoint = null; this.marqueeStart = null; this.touchSelectDown = null;
+    this.strokeStartedTs = 0;
+    this.strokeStartClient = null;
+    // Der nächste Strich dieses Zeigers darf die Druckkurve neu beurteilen: ein Treiber kann pro
+    // Kontakt unterschiedlich melden, und ein Plateau vom Vorstrich darf echten Druck nicht blocken.
+    this.pressureTracker.forget(pointerId);
     this.dragSnapshot = []; this.dragStart = null;
     this.resizeSnapshot = []; this.resizeHandle = null; this.resizeBox = null; this.resizeCurrent = null;
     this.transientLaser = null;

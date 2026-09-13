@@ -160,7 +160,7 @@ body.hp-editor-open { overflow: hidden; }
 }
 .hp-paper-lines { background-image: linear-gradient(to bottom, transparent calc(var(--hp-line-y, 32px) - 1px), rgb(86 117 158 / 24%) var(--hp-line-y, 32px)); background-size: 100% var(--hp-line-y, 32px); }
 .hp-paper-blank { background-image: none; }
-.hp-page canvas { display: block; width: 100%; height: auto; touch-action: none; }
+.hp-page canvas { display: block; width: 100%; height: auto; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
 .hp-inline:not(.is-editing) .hp-page canvas { pointer-events: none; }
 .hp-inline.is-editing .hp-page canvas { cursor: crosshair; }
 .hp-inline.is-editing.is-pen-hover .hp-page canvas,

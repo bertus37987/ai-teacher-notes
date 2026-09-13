@@ -1,5 +1,44 @@
 # Changelog — Smooth Handwriting
 
+## 0.25.36 (13. September 2026) — iPad: Text verschwand, Stift reagierte manchmal nicht
+
+Nutzerbefund vom iPad: „der handschriebene Text verschwindet manchmal, der Eingang wird erst
+gar nicht registriert, man muss absetzen". Ursache waren fünf Stellen im Zeiger-Lebenszyklus,
+die auf iOS/iPadOS anders verlaufen als auf Linux/Electron. Alle Messungen und Gegenmessungen
+stehen in `tests/ipad-pointer.test.ts`.
+
+- **Abgebrochene Striche wurden gelöscht** — die Hauptursache für „Text verschwindet".
+  `pointercancel` und `lostpointercapture` (iOS schickt sie beim Aufsetzen der Handfläche, bei
+  der Gestenerkennung, beim App-Wechsel oder Sperrbildschirm) verwarfen die bereits
+  geschriebene Tinte: `page.elements.filter(...)` entfernte den ganzen Strich. Gemessen vorher
+  **0 Punkte nach dem Abbruch**, jetzt bleiben alle Punkte stehen. Nur Formvorschauen und
+  Auswahl-Rahmen rollen weiterhin zurück.
+- **Der erste Stiftpunkt nach dem Aufsetzen ging verloren** (WebKit-Bug 276287): der erste
+  `pointermove` nach `setPointerCapture` kommt auf iOS ohne Capture an, und die Prüfung
+  `hasPointerCapture()` verwarf ihn. Gemessen vorher **1 statt 11 Punkten**, jetzt alle 11.
+  Es zählt nur noch der Zeigervergleich.
+- **Ein hängender Strich blockierte jeden folgenden Kontakt lautlos.** Lieferte iOS kein
+  `pointerup`, blieb der Editor in „Strich läuft" stehen und verwarf den nächsten Aufsatz —
+  genau das „reagiert manchmal nicht". Jetzt wird der alte Strich sauber abgeschlossen und der
+  neue beginnt (gemessen: **2 statt 0 Elemente**).
+- **Handballen und ein zweiter Finger brechen den Stiftstrich nicht mehr ab** (Palm-Rejection).
+  Ein Doppel-Ereignis desselben Aufsetzens zerschneidet den Strich ebenfalls nicht mehr — ohne
+  diese beiden Sperren hätte der neue Abschlussmechanismus das Absetzen erzwungen, statt es zu
+  beheben.
+- **Verspätete Abschluss-Ereignisse** (`pointerup` kommt auf iOS nach einem neuen
+  `pointerdown` an) beenden den neuen Strich nicht mehr.
+- **Der iPad-Stift schreibt jetzt wie der iPad-Stift.** Die Regel „Druck ≥ 1 ⇒ 0,72" war ein
+  Yoga-Workaround und verbog jeden kräftigen Apple-Pencil-Strich. Der Druck wird nun über den
+  Verlauf des Strichs beurteilt (`PenPressureTracker`): schwankt der Wert, wird er geglaubt —
+  auch 1,0; meldet der Treiber ein konstantes Plateau, greift weiterhin der Ersatzwert. Die
+  Stift-Diagnose sagt jetzt ausdrücklich, welcher der beiden Fälle vorliegt.
+- `setPointerCapture` wird abgesichert (kann auf iOS werfen) und die Zeichenfläche schützt sich
+  gegen iOS-Textauswahl, Kontextmenü und Tipp-Hervorhebung
+  (`user-select`, `-webkit-touch-callout`, `-webkit-tap-highlight-color`).
+
+**Nicht geprüft:** echtes iPad. Die Befunde sind gegen den gebündelten Editor im Test nachgestellt
+und vor/nach dem Fix gemessen; die Hardwarebestätigung steht aus.
+
 ## 0.25.35 (13. September 2026) — Block-Befehle sind auch auf dem iPad auffindbar
 
 - **Fehler behoben: In der Befehlspalette erschien nur „Stift-Diagnose", der Befehl

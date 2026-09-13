@@ -57,6 +57,51 @@ export function isFingerInput(event: PointerSignature, force = false): boolean {
 /** Der zuletzt benutzte Gerätetyp gilt, solange das andere ruht. */
 export const PEN_HOVER_GRACE_MS = 900;
 
+/**
+ * Druckwerte sind hardwareabhängig, und genau daran scheiterte das iPad.
+ *
+ * Apple Pencil (iPad) liefert echten, kontinuierlichen Druck 0 … 1 — beim festen Aufdrücken
+ * auch exakt 1.0. Manche Wacom-/Yoga-Treiber melden dagegen einen KONSTANTEN Wert (0.5 oder 1),
+ * der nichts über den Anschlag aussagt. Die alte Regel „≥ 1 ⇒ 0,72" war ein Yoga-Workaround und
+ * verbog damit jeden kräftigen iPad-Strich (Nutzerbefund 13.9.2026: „der iPad-Stift
+ * unterscheidet sich vom Yoga-Stift").
+ *
+ * Diese Klasse entscheidet deshalb pro Zeiger, ob der Wert überhaupt schwankt: schwankt er,
+ * wird er geglaubt (auch 1.0); ist er konstant, greift der neutrale Ersatzwert.
+ */
+export class PenPressureTracker {
+  private seen = new Map<number, { min: number; max: number }>();
+
+  observe(pointerId: number, raw: number): { pressure: number; varies: boolean } {
+    // Kein Kontakt / Maus-Idiom: neutraler Wert (unverändert zum bisherigen Verhalten).
+    if (!Number.isFinite(raw) || raw <= 0) return { pressure: 0.5, varies: false };
+    const spanne = this.seen.get(pointerId);
+    if (spanne) {
+      spanne.min = Math.min(spanne.min, raw);
+      spanne.max = Math.max(spanne.max, raw);
+    } else {
+      this.seen.set(pointerId, { min: raw, max: raw });
+    }
+    const varies = (this.seen.get(pointerId)!.max - this.seen.get(pointerId)!.min) > 0.02;
+    // Echter Zwischenwert: ein Stift, der 0 … 1 fein auflöst (Apple Pencil), wird geglaubt —
+    // genau wie bisher. Kein Grund, daran etwas zu verbiegen.
+    if (raw < 1) return { pressure: raw, varies };
+    // Genau 1.0 ist der Zweifelsfall: echter fester Anschlag (Apple Pencil) ODER Treiber-Plateau
+    // (manche Wacom-Treiber melden konstant). Der Verlauf entscheidet.
+    return { pressure: varies ? 1 : 0.72, varies };
+  }
+
+  forget(pointerId: number): void { this.seen.delete(pointerId); }
+  reset(): void { this.seen.clear(); }
+}
+
+/** Zeigt die Schrift eine echte Verlaufskurve — reagiert der Treiber auf den Anschlag? */
+export function pressureVaries(samples: Array<{ pressure: number }>): boolean {
+  const werte = samples.map((sample) => sample.pressure).filter((wert) => Number.isFinite(wert) && wert > 0);
+  if (werte.length < 2) return false;
+  return Math.max(...werte) - Math.min(...werte) > 0.02;
+}
+
 export function penCursorActive(
   isPen: boolean,
   contact: boolean,
@@ -66,6 +111,16 @@ export function penCursorActive(
   if (!isPen) return false;
   if (contact) return true;
   return msSinceMouse > grace;
+}
+
+/**
+ * Hängt der laufende Strich? Grundlage des Sicherheitsnetzes (iPad-Befund 13.9.2026):
+ * iOS schickt beim Aufsetzen der Handfläche oder beim Wechsel in den Hintergrund nicht immer
+ * ein Abschlussereignis. Ohne Netz blieb der Editor in „Strich läuft" stehen und der nächste
+ * Strich wurde lautlos verschluckt — der Nutzer sah „reagiert manchmal nicht".
+ */
+export function strokeIsStuck(lastActivityTs: number, now: number, timeoutMs = 1200): boolean {
+  return lastActivityTs > 0 && now - lastActivityTs > timeoutMs;
 }
 
 /** Was das Plugin beim letzten Zeigerereignis gesehen hat (für die Stift-Diagnose). */
@@ -146,7 +201,10 @@ export function describePenDiagnostic(samples: PenDiagnosticSample[]): string {
     `Ereignisse: ${samples.length} (${typen})`,
     rat + ruckeln,
     `Probenabstand min/median/max: ${spanne} ms`,
-    `Druck: ${zahl(Math.min(...druecke))} … ${zahl(Math.max(...druecke))}`,
+    `Druck: ${zahl(Math.min(...druecke))} … ${zahl(Math.max(...druecke))}`
+      + (pressureVaries(samples)
+        ? "  (schwankt — echter Anschlag, Apple Pencil liefert das)"
+        : "  (KONSTANT — der Treiber meldet nur ein Plateau; Stärke folgt dann festen Werten)"),
     `Neigung: ${zahl(Math.min(...neigungen))} … ${zahl(Math.max(...neigungen))}`,
     `als Stift erkannt: ${alsStift} von ${samples.length}`,
     `Stiftmodus aktiv: ${stiftModus} von ${samples.length}`
