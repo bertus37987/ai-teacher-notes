@@ -51,7 +51,7 @@ console.log("notebook-transfer: detached pages and collision-safe IDs passed");
 
 // Real editor methods with only Obsidian/browser host APIs substituted.
 const requireProject = createRequire(`${process.cwd()}/package.json`);
-const code = requireProject("esbuild").buildSync({ entryPoints: ["src/main.ts"], bundle: true, platform: "node", format: "cjs", external: ["obsidian"], write: false }).outputFiles[0].text;
+const code = requireProject("esbuild").buildSync({ entryPoints: ["src/main.ts"], bundle: true, platform: "node", format: "cjs", target: "es2022", loader: { ".woff2": "binary" }, external: ["obsidian"], write: false }).outputFiles[0].text;
 const notices: string[] = [];
 let downloaded: Blob | undefined;
 let downloadName = "";
@@ -119,6 +119,9 @@ runInNewContext(code, {
   module: moduleStub, exports: moduleStub.exports,
   require: (name: string) => name === "obsidian" ? { MarkdownRenderChild: class {}, Plugin: class {}, PluginSettingTab: class {}, Notice: class { constructor(message: string) { notices.push(message); } }, Modal: class {}, Setting: class {} } : requireProject(name),
   console, structuredClone, crypto: globalThis.crypto, AbortController, DOMException, TextEncoder, Blob,
+  // Buffer: das Test-Bundle entsteht mit platform "node", dort dekodiert esbuild die eingebettete
+  // Handschrift-Schrift über Buffer. Das Prod-Bundle (platform browser) nutzt die reine JS-Tabelle.
+  Buffer,
   URL: { createObjectURL(blob: Blob) { downloaded = blob; return "blob:local"; }, revokeObjectURL: noop },
   window: { setTimeout: () => 1, clearTimeout: noop },
   document: fakeDocument

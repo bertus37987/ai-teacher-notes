@@ -2,7 +2,7 @@ import { build } from "esbuild";
 import { mkdir, copyFile, cp, readFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 await mkdir("lab-dist", { recursive: true });
-await build({ entryPoints: ["lab/main.ts"], bundle: true, format: "esm", platform: "browser", target: "es2022", outfile: "lab-dist/lab.js", alias: { obsidian: "./lab/obsidian-mock.ts" } });
+await build({ entryPoints: ["lab/main.ts"], bundle: true, format: "esm", platform: "browser", target: "es2022", loader: { ".woff2": "binary" }, outfile: "lab-dist/lab.js", alias: { obsidian: "./lab/obsidian-mock.ts" } });
 const version = createHash("sha256").update(await readFile("lab-dist/lab.js")).update(await readFile("styles.css")).digest("hex").slice(0, 12);
 await writeFile("lab-dist/index.html", (await readFile("lab/index.html", "utf8")).replace('src="lab.js"', `src="lab.js?v=${version}"`).replace('href="styles.css"', `href="styles.css?v=${version}"`));
 await copyFile("styles.css", "lab-dist/styles.css");

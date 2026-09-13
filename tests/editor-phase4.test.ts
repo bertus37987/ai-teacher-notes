@@ -5,7 +5,7 @@ import { runInNewContext } from "node:vm";
 // Bundle the real editor; only the unavailable Obsidian host/DOM is substituted.
 const requireFromProject = createRequire(`${process.cwd()}/package.json`);
 const { buildSync } = requireFromProject("esbuild");
-const code = buildSync({ entryPoints: ["src/main.ts"], bundle: true, platform: "node", format: "cjs", external: ["obsidian"], write: false }).outputFiles[0].text;
+const code = buildSync({ entryPoints: ["src/main.ts"], bundle: true, platform: "node", format: "cjs", target: "es2022", loader: { ".woff2": "binary" }, external: ["obsidian"], write: false }).outputFiles[0].text;
 const noop = () => {};
 class NodeStub {
   style: any = { setProperty(name: string, value: string) { this[name] = value; } };
@@ -32,6 +32,9 @@ runInNewContext(code, {
   module: moduleStub, exports: moduleStub.exports,
   require: (name: string) => name === "obsidian" ? { MarkdownRenderChild: class {}, Plugin: class {}, PluginSettingTab: class {}, Notice: class {}, Modal: class {}, Setting: class {} } : requireFromProject(name),
   console, structuredClone, crypto: globalThis.crypto, setTimeout, clearTimeout,
+  // Buffer: das Test-Bundle entsteht mit platform "node", dort dekodiert esbuild die eingebettete
+  // Handschrift-Schrift über Buffer. Das Prod-Bundle (platform browser) nutzt die reine JS-Tabelle.
+  Buffer,
   window: { devicePixelRatio: 1, setTimeout: () => 1, clearTimeout: noop },
   document: { createElement: () => new NodeStub(), documentElement: {} },
   getComputedStyle: () => ({ getPropertyValue: () => "#abc" }),

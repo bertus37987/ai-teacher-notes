@@ -1,9 +1,10 @@
 # Smooth Handwriting — so installieren es Freunde
 
-Stand: 13. September 2026 · Version **0.25.33** · Repo: <https://github.com/bertus37987/ai-teacher-notes>
+Stand: 13. September 2026 · Version **0.25.34** · Repo: <https://github.com/bertus37987/ai-teacher-notes>
 
 Die Erweiterung ist als Beta veröffentlicht: Das Repo ist öffentlich und das neueste Release hängt
-`main.js`, `manifest.json` und `styles.css` an. Für Fremde gibt es deshalb drei Wege.
+`main.js`, `manifest.json`, `styles.css` sowie ein vollständiges ZIP an. Für Fremde gibt es deshalb
+drei Wege.
 
 ## Weg A — iPad/iPhone oder Desktop, bequem: BRAT
 
@@ -48,24 +49,33 @@ Feste Direktlinks (immer die neueste Version):
 - <https://github.com/bertus37987/ai-teacher-notes/releases/latest/download/main.js>
 - <https://github.com/bertus37987/ai-teacher-notes/releases/latest/download/styles.css>
 
-## Was fehlt, wenn man so installiert (ehrlich gesagt)
+## Weg C — vollständiges Paket (für die Handschrift-Erkennung)
 
-- **Handschrift→Text-Erkennung fehlt.** BRAT und Weg B laden nur die drei Dateien. Der Zeichen-Editor
-  ist vollständig, aber beim Erkennen meldet die Erweiterung „HTR-Worker fehlt. Bitte das vollständige
-  Plugin-Paket installieren." Grund: Modell (`model.onnx`, 10 MB), ONNX-Runtime (13 MB) und die
-  Caveat-Schrift liegen in `assets/` (~24 MB) und hängen **nicht** am Release. Das komplette ZIP
-  entsteht lokal mit `npm run plugin:package`, ist per `.gitignore` vom Repo ausgeschlossen und
-  damit für Fremde unsichtbar.
-- **iPad ist ungetestet.** `isDesktopOnly: false` ist gesetzt, probiert hat es aber noch niemand.
-- **Nicht im Community-Store.** Deshalb findet man die Erweiterung in Obsidian nicht über „Durchsuchen".
-  Dafür wäre ein Pull-Request an <https://github.com/obsidianmd/obsidian-releases> nötig (ID
-  `smooth-handwriting` ist frei, Prüfung dauert Tage bis Wochen). Sobald der Eintrag durch ist, genügt
-  „Suchen → Installieren → Aktivieren" und BRAT wird überflüssig.
+Nur die drei Dateien aus Weg A/B enthalten die lokale Handschrift-Erkennung **nicht** (Modell und
+ONNX-Laufzeit, ~24 MB). Wer „Handschrift → Text" nutzen will, lädt
+`smooth-handwriting-<version>-preview.zip` vom neuesten Release, entpackt es und legt den Ordner
+`smooth-handwriting/` nach `<Vault>/.obsidian/plugins/`. Darin ist alles: Programm, Schrift,
+Modell und Laufzeit.
 
-## Prüfsummen 0.25.33 (Release = lokaler Build = hier installiert)
+Auf dem iPad ist das ZIP kaum zu entpacken — dort bleibt Weg A der einzige praktikable Weg, und die
+Erkennung damit vorerst außen vor.
+
+## Was inzwischen nicht mehr fehlt
+
+- **Die Handschrift-Schrift steckt seit 0.25.34 im Programm** (`main.js`), nicht mehr in
+  `assets/`. Vorher meldete jede BRAT- oder Store-Installation beim Start
+  „Handschrift-Font fehlt. Bitte das vollständige Plugin-ZIP installieren." — das ist behoben.
+- **iPad ist weiterhin ungetestet.** `isDesktopOnly: false` ist gesetzt, probiert hat es aber noch
+  niemand.
+- **Nicht im Community-Store.** Deshalb findet man die Erweiterung in Obsidian nicht über
+  „Durchsuchen". Dafür wäre ein Pull-Request an <https://github.com/obsidianmd/obsidian-releases>
+  nötig (ID `smooth-handwriting` ist frei, Prüfung dauert Tage bis Wochen). Sobald der Eintrag
+  durch ist, genügt „Suchen → Installieren → Aktivieren" und BRAT wird überflüssig.
+
+## Prüfsummen 0.25.34 (Release = lokaler Build = hier installiert)
 
 ```
-2fa10d3a974a59981f5cb34a70973a67e818cdaf8f94289baef7badd3c82b5fd  main.js
-bba503fbbd1895c1eae3b2cd31ccabd0723e348cebf9778c6f54986590a26021  manifest.json
+82958cbbcc636e45eb9ffea3d73685ab6389c279644bab3125057c3fb884ba8a  main.js
+07fe95563598f75f790766089fc4eace50cb8d3d094e69e7aaa026da51055b75  manifest.json
 fc13db68dfc13a1dd3e3a40b14927e0ea9440ece3c00f3715fb224147f84a596  styles.css
 ```

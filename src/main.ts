@@ -30,6 +30,7 @@ import type { AgentProposalOutcome } from "./agent-channel";
 import { exportNotebookBackup, parseNotebookBackup, prepareBackupPages } from "./notebook-transfer";
 import { ONE_NOTE_MAX_BYTES, ONE_NOTE_PAGE_HEIGHT, ONE_NOTE_PAGE_WIDTH, blocksToPageElements, buildOneNoteHtml, extractOneNoteBlocks, layoutOneNoteBlocks, parseMhtArchive, textElementToHtml } from "./onenote-transfer";
 import type { PDFDocumentProxy } from "pdfjs-dist";
+import caveatFontBytes from "../web/fonts/caveat-latin.woff2";
 
 type Tool = "pen" | "brush" | "highlight" | "eraser" | "laser" | "fill" | "select" | ShapeDragTool;
 
@@ -2744,10 +2745,15 @@ export default class SmoothHandwritingPlugin extends Plugin {
     return editor.proposeAgentBatch(batch, label);
   }
   async onload(): Promise<void> {
-    const face = new FontFace("Teacher Caveat", `url("${this.assetUrl("caveat-latin.woff2")}")`);
-    const fontSet = document.fonts as FontFaceSet & Set<FontFace>;
-    try { fontSet.add(await face.load()); this.register(() => { fontSet.delete(face); }); }
-    catch { new Notice("Handschrift-Font fehlt. Bitte das vollständige Plugin-ZIP installieren."); }
+    // Die Handschrift-Schrift kommt aus dem Bundle, nicht mehr aus assets/: BRAT und der
+    // Community-Store liefern nur main.js, manifest.json und styles.css aus, dort meldete
+    // jede Installation beim Laden „Handschrift-Font fehlt" (Nutzerbefund 13.9.2026).
+    try {
+      const face = new FontFace("Teacher Caveat", caveatFontBytes);
+      const fontSet = document.fonts as FontFaceSet & Set<FontFace>;
+      fontSet.add(await face.load());
+      this.register(() => { fontSet.delete(face); });
+    } catch { /* Ohne registrierte Schrift greifen die Ersatzschriften aus rendering.ts. */ }
     const stored = await this.loadData() as Partial<SmoothHandwritingSettings> | null;
     this.settings = Object.assign({}, DEFAULT_SETTINGS, stored);
     if ((stored?.settingsVersion ?? 0) < 3) {

@@ -1,5 +1,25 @@
 # Changelog — Smooth Handwriting
 
+## 0.25.34 (13. September 2026) — Handschrift-Schrift liegt im Bundle
+
+- **Fehler behoben: „Handschrift-Font fehlt. Bitte das vollständige Plugin-ZIP
+  installieren."** Die Schrift wurde beim Laden aus `assets/caveat-latin.woff2`
+  geholt. BRAT und der Community-Store liefern aber nur `main.js`, `manifest.json`
+  und `styles.css` aus — dort zeigte deshalb **jede** Installation diese Meldung,
+  obwohl die Zeichenfläche vollständig funktionierte.
+- **Die Schrift steckt jetzt in `main.js`** (esbuild-Loader `binary`, 74.932 Bytes;
+  das Bundle wächst von 453.548 auf 554.103 Bytes). Kein Zugriff auf `assets/` mehr
+  nötig, die Meldung entfällt ersatzlos; wenn die Registrierung wider Erwarten
+  scheitert, greifen still die Ersatzschriften.
+- **Wichtig für Installationen aus dem Community-Store oder über BRAT:** Ohne
+  `assets/` fehlt weiterhin die lokale Handschrift-Erkennung (Modell + ONNX-Laufzeit,
+  ~24 MB) — dafür bleibt das vollständige ZIP am Release nötig. Die Meldung dazu
+  (`HTR-Worker fehlt`) nennt diesen Weg.
+- Interne Bauhilfen nachgezogen: `loader: { ".woff2": "binary" }` und
+  `target: es2022` in allen Bundling-Stellen (Plugin, Prüfstand, Testlauf und den
+  Tests, die `src/main.ts` selbst bündeln); das Node-Test-Bundle braucht `Buffer`
+  im vm-Sandbox.
+
 ## 0.25.33 (11. September 2026) — Stift-Diagnose misst jetzt die Abtastrate
 
 - **Die Stift-Diagnose zeigt, was der Rechner WIRKLICH vom Stift bekommt:** Abstand

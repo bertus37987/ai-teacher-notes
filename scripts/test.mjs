@@ -13,6 +13,8 @@ try {
       bundle: true,
       platform: "node",
       format: "cjs",
+      target: "es2022",
+      loader: { ".woff2": "binary" },
       write: false
     });
     const file = join(directory, `${basename(suite, ".ts")}.cjs`);
