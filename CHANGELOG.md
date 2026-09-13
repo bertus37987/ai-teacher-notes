@@ -1,5 +1,26 @@
 # Changelog — Smooth Handwriting
 
+## 0.25.38 (13. September 2026) — „Buchstaben schützen" schützt jetzt wirklich Buchstaben
+
+Dritter Befund aus demselben Messgang wie 0.25.37. Der Schalter „Buchstaben schützen"
+(`handwritingMode`) ist standardmäßig AN und heißt genau das — geleistet hat er es nicht.
+
+- **Gehaltene Buchstaben wurden zu Ellipsen.** Der Halte-Snap („Halten für perfekte Form",
+  ebenfalls standardmäßig an) hatte im Schreibmodus eine feste Größengrenze von 34 px. Die
+  Schreibhöhe des Plugins beträgt aber **48 px** auf Karo (2 × 24), 32 px auf Linien, 36 px als
+  Standardgröße — Buchstaben und runde Ziffern sind also größer als die Grenze. Gemessen: ein
+  gehaltenes Kapitel-„O" von 40×50 px wurde zur perfekten **Ellipse**, ein „8" von 44×60 ebenso.
+- Die Grenze kommt jetzt aus der eingestellten Schreibhöhe (`holdSnapMinSide`, Faktor 1,8):
+  Karo 86 px · Linien 58 px · Blank 65 px — immer über Buchstabengröße. Bewusst gezeichnete
+  Formen (Kreis ab ~120 px) rasten weiterhin ein.
+- Getestet in beide Richtungen: `tests/hold-snap-guard.test.ts` (20 Fälle — vier Buchstaben- und
+  Ziffernformen auf allen drei Papiereinstellungen dürfen nicht konvertieren, drei bewusste
+  Formen müssen es, dazu Zeichenmodus und Ziehen ohne Halten unberührt). Zwei bestehende
+  Vertragstests, die die alte feste Zahl aus dem Quelltext lasen, prüfen jetzt das Verhalten.
+
+Nicht betroffen: Ziehen ohne Halten (Formen-Werkzeug) und der Zeichenmodus — dort greift die
+Grenze nicht.
+
 ## 0.25.37 (13. September 2026) — Schreibschrift wurde weggekritzelt
 
 Zweite Ursache des iPad-Befunds „es verschwindet text manchmal", gefunden beim Weitermessen

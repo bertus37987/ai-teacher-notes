@@ -1,7 +1,7 @@
 import { App, Editor, MarkdownPostProcessorContext, MarkdownRenderChild, Notice, Plugin, PluginSettingTab, Setting, TFile, loadPdfJs, normalizePath } from "obsidian";
 import { HandwritingDocumentV3, HandwritingPage, HighlightElement, ImageElement, PageElement, Paper, ShapeElement, ShapeKind, StrokeElement, alignPageBaselines, cloneDocument, createDocument, createPage, elementBounds, mergeClosedLineShapes, parseNotebook } from "./document";
 import { normalizeHandwritingV2 } from "./handwriting-v2";
-import {PAPER_WRITING_DEFAULTS,PaperWritingSettings,paperWritingLayout,splitNewInkWords,isDrawingCluster} from "./handwriting-layout";
+import {PAPER_WRITING_DEFAULTS,PaperWritingSettings,paperWritingLayout,splitNewInkWords,isDrawingCluster,allowHoldSnap} from "./handwriting-layout";
 import {penCursorActive,isPenInput,isFingerInput,describePenDiagnostic,PenDiagnosticSample,PenPressureTracker,strokeIsStuck} from "./input-device";
 import { drawShapeMeasurements, shapeMeasurements } from "./shape-measurements";
 import { ShapeDragTool, draggedShapePoints, optimizeShape, shapeContainsPoint, snapLineAngle, snapStrokeEndpoints } from "./shapes";
@@ -78,9 +78,6 @@ export interface SmoothHandwritingSettings extends PaperWritingSettings {
   liveConvertMinConfidence: number;
 }
 
-/** Halten im Schreibmodus snappt nur Züge, die deutlich größer als Buchstaben sind (Review 10.9.2026):
- *  ein geschriebenes „o" ist ~16–28 px, eine bewusst gehaltene Form ≥ 34 px. */
-const HOLD_SNAP_MIN_WRITING = 34;
 // Nutzerwunsch 10.9.2026 („delay für das fill, weil sonst wird es beim Halten direkt
 // gefüllt"): Eine gehaltene Form erscheint zuerst nur als Kontur. Gefüllt wird erst,
 // wenn der Stift danach kurz still bleibt — wer sofort weiterschreibt, behält die
@@ -1579,7 +1576,13 @@ export class InlineHandwritingEditor extends MarkdownRenderChild {
     // Dort greift der Snap nur auf deutlich größere geschlossene Züge — Buchstaben bleiben Schrift.
     if (force && this.handwritingMode) {
       const box = elementBounds(stroke);
-      if (Math.min(box.maxX - box.minX, box.maxY - box.minY) < HOLD_SNAP_MIN_WRITING) return false;
+      // Grenze aus der eingestellten Schreibhöhe — Buchstaben bleiben Schrift (s. holdSnapMinSide).
+      const writingHeight = paperWritingLayout(page.paper, this.plugin.settings).height;
+      const allowed = allowHoldSnap({
+        force, handwritingMode: this.handwritingMode, writingHeight,
+        width: box.maxX - box.minX, height: box.maxY - box.minY
+      });
+      if (!allowed) return false;
     }
     let candidate: InkStroke = stroke;
     if (this.plugin.settings.shapeEndpointSnap) {

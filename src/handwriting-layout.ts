@@ -1,6 +1,25 @@
 import {Paper,paperBaselineStep,StrokeElement,elementBounds} from "./document";
 export interface PaperWritingSettings {beautifyPaperSize:boolean;beautifySize:number;gridWritingHeight:number;lineWritingHeight:number}
 export const PAPER_WRITING_DEFAULTS:PaperWritingSettings={beautifyPaperSize:true,beautifySize:36,gridWritingHeight:2,lineWritingHeight:1};
+/**
+ * Halte-Snap im Schreibmodus: nur DEUTLICH größere geschlossene Züge werden zur Form.
+ *
+ * Der Schalter heißt „Buchstaben schützen" — genau das leistete er nicht: die Grenze lag bei
+ * 34 px, die Schreibhöhe des Plugins ist aber 48 px (Karo: 2 × 24) bzw. 32 px (Linien). Ein
+ * gehaltenes Kapitel-„O" von 40×50 px wurde deshalb zur perfekten Ellipse (gemessen 13.9.2026).
+ * Die Grenze kommt jetzt aus der eingestellten Schreibhöhe: sie liegt immer über Buchstaben-
+ * und Zifferngröße, lässt einen bewusst gezeichneten Kreis aber weiter einrasten.
+ */
+export function holdSnapMinSide(writingHeight: number): number {
+  return Math.max(34, Math.round(writingHeight * 1.8));
+}
+
+/** Darf ein gehaltener Zug im Schreibmodus zur Form werden? */
+export function allowHoldSnap(options: { force: boolean; handwritingMode: boolean; width: number; height: number; writingHeight: number }): boolean {
+  if (!options.force || !options.handwritingMode) return true;
+  return Math.min(options.width, options.height) >= holdSnapMinSide(options.writingHeight);
+}
+
 export function paperWritingLayout(paper:Paper,settings:PaperWritingSettings):{height:number} {
   const step=paperBaselineStep(paper);
   const units=paper==="grid" ? settings.gridWritingHeight : settings.lineWritingHeight;

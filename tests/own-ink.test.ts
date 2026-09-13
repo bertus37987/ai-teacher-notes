@@ -3,6 +3,7 @@ import {readFileSync} from "node:fs";
 import {closeOwnInkLoop,normalizeHandwritingV2,smoothOwnInk,HandwritingV2Options} from "../src/handwriting-v2";
 import {StrokeElement,elementBounds} from "../src/document";
 import {drawInkStroke} from "../src/rendering";
+import {allowHoldSnap,holdSnapMinSide} from "../src/handwriting-layout";
 const options:HandwritingV2Options={height:48,strength:1,spacing:.16,lockRows:true,pageWidth:1200,pageHeight:1697,paper:"grid",rowStep:72};
 const stroke=(id:string,xy:number[][]):StrokeElement=>({type:"stroke",id,color:"#111",size:3,points:xy.map(([x,y],i)=>({x,y,pressure:.2+i*.01,time:100+i*10}))});
 const w=stroke("W",[[150,180],[158,210],[167,191],[176,210],[184,180]]);
@@ -63,9 +64,16 @@ assert.ok(/isDrawingCluster/.test(live),"live conversion must respect the drawin
 assert.ok(/this\.remember\(\)/.test(live),"live conversion snapshots undo state before replacing ink");
 assert.ok(!/if\s*\(lines\.length\)\s*\{\s*this\.markChanged/.test(live),"a fully skipped conversion must not schedule a save");
 const holdGate=main.slice(main.indexOf("private convertAutomaticShape"),main.indexOf("private convertAutomaticShape")+800);
-assert.ok(/HOLD_SNAP_MIN_WRITING/.test(holdGate)&&/handwritingMode/.test(holdGate),"held strokes in writing mode need a size gate so letters stay letters");
-const holdMin=Number(/-?const HOLD_SNAP_MIN_WRITING\s*=\s*(\d+)/.exec(main)?.[1]);
-assert.ok(holdMin>28&&holdMin<60,"hold gate sits above letter size and below deliberate shapes");
+assert.ok(/allowHoldSnap/.test(holdGate)&&/handwritingMode/.test(holdGate),"held strokes in writing mode need a size gate so letters stay letters");
+// 13.9.2026: Die feste 34-px-Grenze lag UNTER der Schreibhöhe (48 px auf Karo) — ein gehaltenes
+// Kapitel-„O" wurde zur Ellipse. Die Grenze kommt jetzt aus der eingestellten Schreibhöhe.
+assert.ok(/paperWritingLayout\(page\.paper/.test(holdGate),"the writing-mode gate derives its limit from the configured writing height");
+// 13.9.2026: Früher stand die Grenze als feste Zahl im Quelltext (34 px) — sie lag UNTER der
+// Schreibhöhe (48 px auf Karo), ein gehaltenes Kapitel-„O" wurde zur Ellipse. Geprüft wird
+// deshalb das Verhalten statt einer Textzeile: über Buchstabengröße, unter bewussten Formen.
+assert.ok(holdSnapMinSide(48)>48,"hold gate sits above letter size");
+assert.equal(allowHoldSnap({force:true,handwritingMode:true,width:40,height:50,writingHeight:48}),false,"a held capital letter stays a letter");
+assert.equal(allowHoldSnap({force:true,handwritingMode:true,width:120,height:120,writingHeight:48}),true,"hold gate sits below deliberate shapes");
 
 // Nutzerauftrag 10.9.2026 („Begradigen geht für Buchstaben noch nicht gut"): Der
 // Tiefpass kann eine weiche Biegung nicht entfernen — gemessen blieb ein 2-px-Bogen am
